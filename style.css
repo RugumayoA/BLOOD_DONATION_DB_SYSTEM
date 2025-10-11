@@ -1,0 +1,349 @@
+/* General Body Styles */
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f8f8; /* Light background */
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* Header */
+.main-header {
+    background-color: #fff;
+    padding: 15px 0;
+    border-bottom: 1px solid #eee;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.main-header .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.main-header .logo {
+    display: flex;
+    align-items: center;
+}
+
+.main-header .logo img {
+    height: 40px; /* Adjust as needed for logo */
+    margin-right: 10px;
+}
+
+.main-header .logo h1 {
+    font-size: 24px;
+    color: #E21C3D; /* Red color from the poster */
+    margin: 0;
+    font-weight: bold;
+}
+
+.main-nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+}
+
+.main-nav ul li {
+    margin-left: 25px;
+}
+
+.main-nav ul li a {
+    text-decoration: none;
+    color: #555;
+    font-weight: 600;
+    transition: color 0.3s ease;
+    padding: 5px 0;
+    position: relative;
+}
+
+.main-nav ul li a:hover,
+.main-nav ul li a.active {
+    color: #E21C3D; /* Red highlight */
+}
+
+.main-nav ul li a.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -5px;
+    width: 100%;
+    height: 3px;
+    background-color: #E21C3D;
+    border-radius: 2px;
+}
+
+
+/* Hero Section */
+.hero-section {
+    background-color: #FEE7ED; /* Light pink background from poster */
+    padding: 80px 0;
+    text-align: center;
+    position: relative;
+    overflow: hidden; /* For potential background elements */
+}
+
+.hero-section .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-align: left;
+}
+
+.hero-content {
+    flex: 1;
+    max-width: 50%;
+    z-index: 1;
+}
+
+.hero-content h2 {
+    font-size: 3em;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.hero-content h1 {
+    font-size: 4.5em; /* Large, impactful text */
+    color: #E21C3D;
+    margin-top: 0;
+    margin-bottom: 20px;
+    line-height: 1.1;
+    font-weight: 800;
+}
+
+.hero-content p {
+    font-size: 1.2em;
+    color: #666;
+    margin-bottom: 30px;
+}
+
+.hero-image {
+    flex: 1;
+    max-width: 45%;
+    text-align: right;
+}
+
+.hero-image img {
+    max-width: 80%;
+    height: auto;
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 12px 25px;
+    border-radius: 5px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.btn-primary {
+    background-color: #E21C3D; /* Red from poster */
+    color: #fff;
+    border: 2px solid #E21C3D;
+}
+
+.btn-primary:hover {
+    background-color: #C01833; /* Darker red on hover */
+    border-color: #C01833;
+}
+
+.btn-secondary {
+    background-color: #fff;
+    color: #E21C3D;
+    border: 2px solid #E21C3D;
+}
+
+.btn-secondary:hover {
+    background-color: #E21C3D;
+    color: #fff;
+}
+
+/* Info Section */
+.info-section {
+    padding: 60px 0;
+    background-color: #f8f8f8;
+}
+
+.info-section .container {
+    display: flex;
+    justify-content: space-around;
+    gap: 30px;
+}
+
+.info-card {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    padding: 30px;
+    flex: 1;
+    min-width: 280px;
+    text-align: center;
+    border-top: 5px solid #E21C3D;
+}
+
+.info-card h3 {
+    color: #E21C3D;
+    font-size: 1.8em;
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+.info-card p {
+    color: #666;
+    margin-bottom: 20px;
+}
+
+
+/* Footer */
+.main-footer {
+    background-color: #333;
+    color: #fff;
+    padding: 30px 0;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+.main-footer p {
+    margin: 5px 0;
+}
+
+/* Common Styles for internal pages (placeholder) */
+.page-title {
+    background-color: #E21C3D;
+    color: #fff;
+    padding: 40px 0;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.page-title h1 {
+    margin: 0;
+    font-size: 2.8em;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 30px;
+    background-color: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.data-table th, .data-table td {
+    border: 1px solid #ddd;
+    padding: 12px 15px;
+    text-align: left;
+}
+
+.data-table th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+    color: #333;
+}
+
+.data-table tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.data-table tr:hover {
+    background-color: #f1f1f1;
+}
+
+.form-container {
+    background-color: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    margin-bottom: 30px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #555;
+}
+
+.form-group input[type="text"],
+.form-group input[type="date"],
+.form-group input[type="email"],
+.form-group input[type="password"],
+.form-group input[type="number"],
+.form-group select,
+.form-group textarea {
+    width: calc(100% - 22px); /* Account for padding and border */
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 1em;
+}
+
+.form-actions {
+    text-align: right;
+}
+
+/* Utility classes */
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.mt-30 { margin-top: 30px; }
+.mb-30 { margin-bottom: 30px; }
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main-header .container,
+    .hero-section .container,
+    .info-section .container {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .main-header .logo h1 {
+        font-size: 20px;
+    }
+
+    .main-nav ul {
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 15px;
+    }
+
+    .main-nav ul li {
+        margin: 0 10px 10px 10px;
+    }
+
+    .hero-content, .hero-image {
+        max-width: 100%;
+        text-align: center;
+    }
+
+    .hero-content h1 {
+        font-size: 3.5em;
+    }
+
+    .hero-section {
+        padding: 50px 0;
+    }
+
+    .info-section .container {
+        gap: 20px;
+    }
+
+    .info-card {
+        min-width: unset;
+        width: 100%;
+    }
+}
