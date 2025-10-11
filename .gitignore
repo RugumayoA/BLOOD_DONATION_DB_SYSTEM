@@ -3,7 +3,7 @@
 
 # Test files
 test_*.php
-testing.php
+
 
 # IDE and editor files
 .vscode/
