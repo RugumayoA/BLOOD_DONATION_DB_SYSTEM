@@ -1,6 +1,7 @@
 <?php
 // Include database connection
 require_once 'config.php';
+require_once 'email_helper.php';
 
 // Handle CRUD operations
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -30,18 +31,68 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         // UPDATE: Resend notification
         if ($action == 'resend' && isset($_POST['notification_id'])) {
-            $sql = "UPDATE notification 
-                    SET status = 'Queued', sent_date = ?, sent_time = ? 
-                    WHERE notification_id = ?";
+            // Get notification details
+            $notif_sql = "SELECT * FROM notification WHERE notification_id = ?";
+            $notif_stmt = $pdo->prepare($notif_sql);
+            $notif_stmt->execute(array($_POST['notification_id']));
+            $notification = $notif_stmt->fetch();
             
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute(array(
-                date('Y-m-d'),
-                date('H:i:s'),
-                $_POST['notification_id']
-            ));
-            
-            $success_message = "Notification resent successfully!";
+            if ($notification) {
+                // Get recipient email address based on type
+                $email = null;
+                $recipient_name = '';
+                
+                if ($notification['recipient_type'] == 'donor') {
+                    $email_sql = "SELECT email, first_name, last_name FROM donor WHERE donor_id = ?";
+                } elseif ($notification['recipient_type'] == 'recipient') {
+                    $email_sql = "SELECT email, first_name, last_name FROM recipient WHERE recipient_id = ?";
+                } else {
+                    $email_sql = "SELECT email, first_name, last_name FROM staff WHERE staff_id = ?";
+                }
+                
+                $email_stmt = $pdo->prepare($email_sql);
+                $email_stmt->execute(array($notification['recipient_id']));
+                $recipient_data = $email_stmt->fetch();
+                
+                if ($recipient_data) {
+                    $email = $recipient_data['email'];
+                    $recipient_name = $recipient_data['first_name'] . ' ' . $recipient_data['last_name'];
+                }
+                
+                // Initial status
+                $status = 'Queued';
+                
+                // If notification type is Email, send the email
+                if ($notification['notification_type'] == 'Email' && $email) {
+                    // Send email using PHPMailer
+                    $result = send_notification_email($email, $recipient_name, $notification['title'], $notification['message']);
+                    
+                    if ($result['success']) {
+                        $status = 'Sent';
+                    } else {
+                        $status = 'Failed';
+                    }
+                }
+                
+                // Update notification
+                $sql = "UPDATE notification 
+                        SET status = ?, sent_date = ?, sent_time = ? 
+                        WHERE notification_id = ?";
+                
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array(
+                    $status,
+                    date('Y-m-d'),
+                    date('H:i:s'),
+                    $_POST['notification_id']
+                ));
+                
+                if ($status == 'Sent') {
+                    $success_message = "Notification resent successfully to " . htmlspecialchars($email) . "!";
+                } else {
+                    $error_message = "Failed to resend notification. Please check email configuration.";
+                }
+            }
         }
         
         // DELETE: Remove notification
@@ -346,7 +397,15 @@ $stats = $stats_stmt->fetch();
     <div class="notifications-container">
         <!-- Success/Error Messages -->
         <?php if (isset($_GET['success']) && $_GET['success'] == 1): ?>
-            <div class="alert alert-success">✅ Notification sent successfully!</div>
+            <div class="alert alert-success">
+                ✅ <?php echo isset($_GET['message']) ? htmlspecialchars($_GET['message']) : 'Notification sent successfully!'; ?>
+            </div>
+        <?php endif; ?>
+        
+        <?php if (isset($_GET['success']) && $_GET['success'] == 0): ?>
+            <div class="alert alert-error">
+                ❌ <?php echo isset($_GET['message']) ? htmlspecialchars($_GET['message']) : 'Notification could not be sent!'; ?>
+            </div>
         <?php endif; ?>
         
         <?php if (isset($success_message)): ?>
