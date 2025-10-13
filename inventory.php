@@ -1,31 +1,6 @@
 <?php
 // inventory.php
 require_once 'config.php';
-
-// Calculate inventory statistics
-$totalUnits = 0;
-$expiringUnits = 0;
-$criticalTypes = array();
-
-try {
-    // Total available units
-    $stmt = $pdo->query("SELECT COUNT(*) as total FROM blood_inventory WHERE status = 'Available'");
-    $result = $stmt->fetch();
-    $totalUnits = $result['total'];
-
-    // Units expiring in 30 days
-    $stmt = $pdo->query("SELECT COUNT(*) as expiring FROM blood_inventory WHERE status = 'Available' AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-    $result = $stmt->fetch();
-    $expiringUnits = $result['expiring'];
-
-    // Critical blood types (less than 10 units)
-    $stmt = $pdo->query("SELECT CONCAT(blood_type, rh_factor) as type_full, COUNT(*) as count FROM blood_inventory WHERE status = 'Available' GROUP BY blood_type, rh_factor HAVING count < 10");
-    while ($row = $stmt->fetch()) {
-        $criticalTypes[] = $row['type_full'];
-    }
-} catch (PDOException $e) {
-    // Handle error silently or log it
-}
 ?>
 
 <!DOCTYPE html>
@@ -70,32 +45,6 @@ try {
 
     <main class="container">
         <section class="mb-30">
-            <h2>Current Blood Stock Overview</h2>
-            <div class="inventory-overview">
-                <div class="info-card">
-                    <h3>Total Available Units</h3>
-                    <p class="large-number"><?php echo $totalUnits; ?></p>
-                </div>
-                <div class="info-card">
-                    <h3>Units Expiring Soon (30 days)</h3>
-                    <p class="large-number warning-text"><?php echo $expiringUnits; ?></p>
-                </div>
-                <div class="info-card">
-                    <h3>Critical Blood Types</h3>
-                    <p class="critical-types">
-                        <?php 
-                        if (count($criticalTypes) > 0) {
-                            echo implode(', ', $criticalTypes);
-                        } else {
-                            echo 'None';
-                        }
-                        ?>
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <section class="mb-30">
             <h2>Detailed Inventory List</h2>
             <div class="data-table-container">
                 <table class="data-table">
@@ -118,12 +67,13 @@ try {
                         try {
                             $stmt = $pdo->query("SELECT * FROM blood_inventory ORDER BY inventory_id DESC");
                             while ($row = $stmt->fetch()) {
-                                $bloodTypeFull = $row['blood_type'] . $row['rh_factor'];
+                                // Blood type is stored as a single value (e.g., 'A+', 'O-') in the database
+                                $bloodTypeFull = $row['blood_type'];
                                 echo "<tr>";
                                 echo "<td>" . $row['inventory_id'] . "</td>";
-                                echo "<td>" . $row['donation_id'] . "</td>";
+                                echo "<td>" . ($row['donation_id'] ? $row['donation_id'] : 'N/A') . "</td>";
                                 echo "<td>" . $bloodTypeFull . "</td>";
-                                echo "<td>" . $row['volume_ml'] . "</td>";
+                                echo "<td>" . $row['quantity_ml'] . "</td>";
                                 echo "<td>" . $row['collection_date'] . "</td>";
                                 echo "<td>" . $row['expiry_date'] . "</td>";
                                 echo "<td>" . ($row['storage_location'] ? $row['storage_location'] : 'N/A') . "</td>";
