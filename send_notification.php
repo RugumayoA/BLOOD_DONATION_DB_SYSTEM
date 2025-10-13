@@ -1,6 +1,7 @@
 <?php
 // Include database connection
 require_once 'config.php';
+require_once 'email_helper.php';
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -12,6 +13,47 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $recipient_id = $_POST['recipient_id'];
         } else {
             $recipient_id = $_POST['staff_id'];
+        }
+        
+        // Get recipient email address based on type
+        $email = null;
+        $recipient_name = '';
+        
+        if ($_POST['recipient_type'] == 'donor') {
+            $email_sql = "SELECT email, first_name, last_name FROM donor WHERE donor_id = ?";
+        } elseif ($_POST['recipient_type'] == 'recipient') {
+            $email_sql = "SELECT email, first_name, last_name FROM recipient WHERE recipient_id = ?";
+        } else {
+            $email_sql = "SELECT email, first_name, last_name FROM staff WHERE staff_id = ?";
+        }
+        
+        $email_stmt = $pdo->prepare($email_sql);
+        $email_stmt->execute(array($recipient_id));
+        $recipient_data = $email_stmt->fetch();
+        
+        if ($recipient_data) {
+            $email = $recipient_data['email'];
+            $recipient_name = $recipient_data['first_name'] . ' ' . $recipient_data['last_name'];
+        }
+        
+        // Initial status
+        $status = 'Queued';
+        $email_error = '';
+        
+        // If notification type is Email, send the email
+        if ($_POST['notification_type'] == 'Email' && $email) {
+            // Send email using PHPMailer
+            $result = send_notification_email($email, $recipient_name, $_POST['title'], $_POST['message']);
+            
+            if ($result['success']) {
+                $status = 'Sent';
+            } else {
+                $status = 'Failed';
+                $email_error = get_email_error_message($result);
+            }
+        } elseif ($_POST['notification_type'] == 'Email' && !$email) {
+            $status = 'Failed';
+            $error_message = "Error: No email address found for the selected recipient.";
         }
         
         // Insert notification
@@ -27,13 +69,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $_POST['message'],
             date('Y-m-d'),
             date('H:i:s'),
-            'Queued',
+            $status,
             $_POST['notification_type']
         ));
         
         // Redirect back to notifications page with success message
-        header("Location: notifications.php?success=1");
-        exit;
+        if (!isset($error_message)) {
+            if ($status == 'Sent') {
+                header("Location: notifications.php?success=1&message=Email sent successfully to " . urlencode($email));
+            } else {
+                $fail_msg = !empty($email_error) ? $email_error : "Email could not be sent. Please check your email configuration.";
+                header("Location: notifications.php?success=0&message=" . urlencode($fail_msg));
+            }
+            exit;
+        }
         
     } catch(PDOException $e) {
         $error_message = "Error: " . $e->getMessage();
@@ -41,19 +90,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 }
 
 // Get all donors for dropdown
-$donors_sql = "SELECT donor_id, first_name, last_name, blood_type FROM donor ORDER BY last_name, first_name";
+$donors_sql = "SELECT donor_id, first_name, last_name, blood_type, email FROM donor ORDER BY last_name, first_name";
 $donors_stmt = $pdo->prepare($donors_sql);
 $donors_stmt->execute();
 $donors = $donors_stmt->fetchAll();
 
 // Get all recipients for dropdown
-$recipients_sql = "SELECT recipient_id, first_name, last_name FROM recipient ORDER BY last_name, first_name";
+$recipients_sql = "SELECT recipient_id, first_name, last_name, email FROM recipient ORDER BY last_name, first_name";
 $recipients_stmt = $pdo->prepare($recipients_sql);
 $recipients_stmt->execute();
 $recipients = $recipients_stmt->fetchAll();
 
 // Get all staff for dropdown
-$staff_sql = "SELECT staff_id, first_name, last_name FROM staff ORDER BY last_name, first_name";
+$staff_sql = "SELECT staff_id, first_name, last_name, email FROM staff ORDER BY last_name, first_name";
 $staff_stmt = $pdo->prepare($staff_sql);
 $staff_stmt->execute();
 $staff_members = $staff_stmt->fetchAll();
@@ -139,7 +188,11 @@ $staff_members = $staff_stmt->fetchAll();
                         <option value="">Choose a donor</option>
                         <?php foreach ($donors as $donor): ?>
                             <option value="<?php echo $donor['donor_id']; ?>">
-                                <?php echo htmlspecialchars($donor['first_name'] . ' ' . $donor['last_name']) . ' - Blood Type: ' . $donor['blood_type'] . ' (ID: ' . $donor['donor_id'] . ')'; ?>
+                                <?php 
+                                    echo htmlspecialchars($donor['first_name'] . ' ' . $donor['last_name']) . ' - Blood Type: ' . $donor['blood_type'];
+                                    echo $donor['email'] ? ' - Email: ' . htmlspecialchars($donor['email']) : ' - (No Email)';
+                                    echo ' (ID: ' . $donor['donor_id'] . ')'; 
+                                ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -152,7 +205,11 @@ $staff_members = $staff_stmt->fetchAll();
                         <option value="">Choose a recipient</option>
                         <?php foreach ($recipients as $recipient): ?>
                             <option value="<?php echo $recipient['recipient_id']; ?>">
-                                <?php echo htmlspecialchars($recipient['first_name'] . ' ' . $recipient['last_name']) . ' (ID: ' . $recipient['recipient_id'] . ')'; ?>
+                                <?php 
+                                    echo htmlspecialchars($recipient['first_name'] . ' ' . $recipient['last_name']);
+                                    echo $recipient['email'] ? ' - Email: ' . htmlspecialchars($recipient['email']) : ' - (No Email)';
+                                    echo ' (ID: ' . $recipient['recipient_id'] . ')'; 
+                                ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -165,7 +222,11 @@ $staff_members = $staff_stmt->fetchAll();
                         <option value="">Choose a staff member</option>
                         <?php foreach ($staff_members as $staff): ?>
                             <option value="<?php echo $staff['staff_id']; ?>">
-                                <?php echo htmlspecialchars($staff['first_name'] . ' ' . $staff['last_name']) . ' (ID: ' . $staff['staff_id'] . ')'; ?>
+                                <?php 
+                                    echo htmlspecialchars($staff['first_name'] . ' ' . $staff['last_name']);
+                                    echo $staff['email'] ? ' - Email: ' . htmlspecialchars($staff['email']) : ' - (No Email)';
+                                    echo ' (ID: ' . $staff['staff_id'] . ')'; 
+                                ?>
                             </option>
                         <?php endforeach; ?>
                     </select>

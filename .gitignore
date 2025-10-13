@@ -1,5 +1,5 @@
 # Sensitive configuration files
-
+email_config.php
 
 # Test files
 test_*.php
