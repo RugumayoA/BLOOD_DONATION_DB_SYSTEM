@@ -1,3 +1,81 @@
+<?php
+// Include database connection
+require_once 'config.php';
+
+// Handle CRUD operations
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $action = isset($_POST['action']) ? $_POST['action'] : '';
+    
+    try {
+        // CREATE: Send new notification
+        if ($action == 'send_notification') {
+            $sql = "INSERT INTO notification (recipient_type, recipient_id, notification_type, title, message, sent_date, sent_time, status, delivery_method) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array(
+                $_POST['recipient_type'],
+                $_POST['recipient_id'],
+                $_POST['notification_type'],
+                $_POST['title'],
+                $_POST['message'],
+                date('Y-m-d'),
+                date('H:i:s'),
+                'Queued',
+                $_POST['notification_type']
+            ));
+            
+            $success_message = "Notification sent successfully!";
+        }
+        
+        // UPDATE: Resend notification
+        if ($action == 'resend' && isset($_POST['notification_id'])) {
+            $sql = "UPDATE notification 
+                    SET status = 'Queued', sent_date = ?, sent_time = ? 
+                    WHERE notification_id = ?";
+            
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array(
+                date('Y-m-d'),
+                date('H:i:s'),
+                $_POST['notification_id']
+            ));
+            
+            $success_message = "Notification resent successfully!";
+        }
+        
+        // DELETE: Remove notification
+        if ($action == 'delete' && isset($_POST['notification_id'])) {
+            $sql = "DELETE FROM notification WHERE notification_id = ?";
+            
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array($_POST['notification_id']));
+            
+            $success_message = "Notification deleted successfully!";
+        }
+        
+    } catch(PDOException $e) {
+        $error_message = "Error: " . $e->getMessage();
+    }
+}
+
+// READ: Get all notifications
+$sql = "SELECT * FROM notification ORDER BY sent_date DESC, sent_time DESC";
+$stmt = $pdo->prepare($sql);
+$stmt->execute();
+$notifications = $stmt->fetchAll();
+
+// READ: Get statistics
+$stats_sql = "SELECT 
+    COUNT(*) as total,
+    SUM(CASE WHEN status = 'Queued' THEN 1 ELSE 0 END) as queued,
+    SUM(CASE WHEN status = 'Sent' THEN 1 ELSE 0 END) as sent,
+    SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed
+    FROM notification";
+$stats_stmt = $pdo->prepare($stats_sql);
+$stats_stmt->execute();
+$stats = $stats_stmt->fetch();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,42 +132,6 @@
             font-size: 0.9em;
             color: #666;
             margin: 5px 0 0 0;
-        }
-        
-        .filters-section {
-            background: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        
-        .filters-row {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            align-items: end;
-        }
-        
-        .filter-group {
-            flex: 1;
-            min-width: 200px;
-        }
-        
-        .filter-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-            color: #555;
-        }
-        
-        .filter-group select,
-        .filter-group input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
         }
         
         .notifications-table-container {
@@ -192,12 +234,14 @@
         .action-buttons {
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
         }
         
         .btn-small {
             padding: 4px 8px;
             font-size: 0.8em;
             border-radius: 3px;
+            cursor: pointer;
         }
         
         .btn-view {
@@ -218,48 +262,28 @@
             border: none;
         }
         
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            gap: 10px;
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
         }
         
-        .pagination button {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 4px;
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
         }
         
-        .pagination button:hover {
-            background: #f8f9fa;
-        }
-        
-        .pagination button.active {
-            background: #E21C3D;
-            color: white;
-            border-color: #E21C3D;
-        }
-        
-        .pagination button:disabled {
-            background: #f8f9fa;
-            color: #6c757d;
-            cursor: not-allowed;
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
         
         .no-notifications {
             text-align: center;
             padding: 60px 20px;
             color: #666;
-        }
-        
-        .no-notifications i {
-            font-size: 4em;
-            color: #ddd;
-            margin-bottom: 20px;
         }
         
         @media (max-width: 768px) {
@@ -270,14 +294,6 @@
             
             .notification-stats {
                 justify-content: center;
-            }
-            
-            .filters-row {
-                flex-direction: column;
-            }
-            
-            .filter-group {
-                min-width: unset;
             }
             
             .notifications-table {
@@ -328,82 +344,49 @@
     </div>
 
     <div class="notifications-container">
+        <!-- Success/Error Messages -->
+        <?php if (isset($_GET['success']) && $_GET['success'] == 1): ?>
+            <div class="alert alert-success">✅ Notification sent successfully!</div>
+        <?php endif; ?>
+        
+        <?php if (isset($success_message)): ?>
+            <div class="alert alert-success"><?php echo $success_message; ?></div>
+        <?php endif; ?>
+        
+        <?php if (isset($error_message)): ?>
+            <div class="alert alert-error"><?php echo $error_message; ?></div>
+        <?php endif; ?>
+
         <!-- Statistics Section -->
         <div class="notifications-header">
             <h2 class="notifications-title">Notifications Dashboard</h2>
             <div class="notification-stats">
                 <div class="stat-card">
-                    <p class="stat-number">156</p>
+                    <p class="stat-number"><?php echo $stats['total']; ?></p>
                     <p class="stat-label">Total Notifications</p>
                 </div>
                 <div class="stat-card">
-                    <p class="stat-number">23</p>
+                    <p class="stat-number"><?php echo $stats['queued']; ?></p>
                     <p class="stat-label">Queued</p>
                 </div>
                 <div class="stat-card">
-                    <p class="stat-number">128</p>
+                    <p class="stat-number"><?php echo $stats['sent']; ?></p>
                     <p class="stat-label">Sent</p>
                 </div>
                 <div class="stat-card">
-                    <p class="stat-number">5</p>
+                    <p class="stat-number"><?php echo $stats['failed']; ?></p>
                     <p class="stat-label">Failed</p>
                 </div>
             </div>
         </div>
 
-        <!-- Filters Section -->
-        <div class="filters-section">
-            <h3 style="margin-top: 0; color: #333;">Filter Notifications</h3>
-            <div class="filters-row">
-                <div class="filter-group">
-                    <label for="recipient-type">Recipient Type</label>
-                    <select id="recipient-type">
-                        <option value="">All Types</option>
-                        <option value="donor">Donor</option>
-                        <option value="recipient">Recipient</option>
-                        <option value="staff">Staff</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="notification-type">Notification Type</label>
-                    <select id="notification-type">
-                        <option value="">All Types</option>
-                        <option value="SMS">SMS</option>
-                        <option value="Email">Email</option>
-                        <option value="Push">Push</option>
-                        <option value="Call">Call</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="status">Status</label>
-                    <select id="status">
-                        <option value="">All Status</option>
-                        <option value="Queued">Queued</option>
-                        <option value="Sent">Sent</option>
-                        <option value="Failed">Failed</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="date-from">From Date</label>
-                    <input type="date" id="date-from">
-                </div>
-                <div class="filter-group">
-                    <label for="date-to">To Date</label>
-                    <input type="date" id="date-to">
-                </div>
-                <div class="filter-group">
-                    <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
-                </div>
-            </div>
-        </div>
 
         <!-- Notifications Table -->
         <div class="notifications-table-container">
             <div class="table-header">
-                <h3 class="table-title">All Notifications</h3>
+                <h3 class="table-title">All Notifications (<?php echo count($notifications); ?>)</h3>
                 <div class="table-actions">
-                    <button class="btn btn-primary" onclick="sendNewNotification()">Send New Notification</button>
-                    <button class="btn btn-secondary" onclick="exportNotifications()">Export</button>
+                    <a href="send_notification.php" class="btn btn-primary">Send New Notification</a>
                 </div>
             </div>
             
@@ -421,110 +404,65 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <td>#001</td>
-                        <td>
-                            <span class="recipient-type recipient-donor">Donor</span><br>
-                            <small>ID: 123</small>
-                        </td>
-                        <td><span class="notification-type type-sms">SMS</span></td>
-                        <td>Blood Donation Reminder</td>
-                        <td class="message-preview">Hi John, it's been 3 months since your last donation. Your blood type O+ is urgently needed...</td>
-                        <td>2024-01-15<br><small>14:30</small></td>
-                        <td><span class="status-badge status-sent">Sent</span></td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="btn btn-small btn-view" onclick="viewNotification(1)">View</button>
-                                <button class="btn btn-small btn-resend" onclick="resendNotification(1)">Resend</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>#002</td>
-                        <td>
-                            <span class="recipient-type recipient-recipient">Recipient</span><br>
-                            <small>ID: 456</small>
-                        </td>
-                        <td><span class="notification-type type-email">Email</span></td>
-                        <td>Blood Request Update</td>
-                        <td class="message-preview">Your blood request has been processed. We found a compatible donor and will contact you soon...</td>
-                        <td>2024-01-15<br><small>10:15</small></td>
-                        <td><span class="status-badge status-sent">Sent</span></td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="btn btn-small btn-view" onclick="viewNotification(2)">View</button>
-                                <button class="btn btn-small btn-resend" onclick="resendNotification(2)">Resend</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>#003</td>
-                        <td>
-                            <span class="recipient-type recipient-staff">Staff</span><br>
-                            <small>ID: 789</small>
-                        </td>
-                        <td><span class="notification-type type-push">Push</span></td>
-                        <td>Emergency Blood Request</td>
-                        <td class="message-preview">URGENT: Emergency blood request for Type A- at City Hospital. Please respond immediately...</td>
-                        <td>2024-01-15<br><small>16:45</small></td>
-                        <td><span class="status-badge status-queued">Queued</span></td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="btn btn-small btn-view" onclick="viewNotification(3)">View</button>
-                                <button class="btn btn-small btn-resend" onclick="resendNotification(3)">Resend</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>#004</td>
-                        <td>
-                            <span class="recipient-type recipient-donor">Donor</span><br>
-                            <small>ID: 234</small>
-                        </td>
-                        <td><span class="notification-type type-call">Call</span></td>
-                        <td>Follow-up Call</td>
-                        <td class="message-preview">Thank you for your recent donation. How are you feeling? Any side effects to report?</td>
-                        <td>2024-01-14<br><small>09:20</small></td>
-                        <td><span class="status-badge status-failed">Failed</span></td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="btn btn-small btn-view" onclick="viewNotification(4)">View</button>
-                                <button class="btn btn-small btn-resend" onclick="resendNotification(4)">Resend</button>
-                                <button class="btn btn-small btn-delete" onclick="deleteNotification(4)">Delete</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>#005</td>
-                        <td>
-                            <span class="recipient-type recipient-recipient">Recipient</span><br>
-                            <small>ID: 567</small>
-                        </td>
-                        <td><span class="notification-type type-sms">SMS</span></td>
-                        <td>Appointment Confirmation</td>
-                        <td class="message-preview">Your blood transfusion appointment is confirmed for tomorrow at 2:00 PM. Please arrive 15 minutes early...</td>
-                        <td>2024-01-14<br><small>15:30</small></td>
-                        <td><span class="status-badge status-sent">Sent</span></td>
-                        <td>
-                            <div class="action-buttons">
-                                <button class="btn btn-small btn-view" onclick="viewNotification(5)">View</button>
-                                <button class="btn btn-small btn-resend" onclick="resendNotification(5)">Resend</button>
-                            </div>
-                        </td>
-                    </tr>
+                    <?php if (empty($notifications)): ?>
+                        <tr>
+                            <td colspan="8" class="no-notifications">
+                                <p>📭 No notifications found</p>
+                                <p>Send your first notification to get started!</p>
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($notifications as $notification): ?>
+                        <tr>
+                            <td>#<?php echo str_pad($notification['notification_id'], 3, '0', STR_PAD_LEFT); ?></td>
+                            <td>
+                                <span class="recipient-type recipient-<?php echo $notification['recipient_type']; ?>">
+                                    <?php echo ucfirst($notification['recipient_type']); ?>
+                                </span><br>
+                                <small>ID: <?php echo $notification['recipient_id']; ?></small>
+                            </td>
+                            <td>
+                                <span class="notification-type type-<?php echo strtolower($notification['notification_type']); ?>">
+                                    <?php echo $notification['notification_type']; ?>
+                                </span>
+                            </td>
+                            <td><?php echo htmlspecialchars($notification['title']); ?></td>
+                            <td class="message-preview">
+                                <?php echo htmlspecialchars(substr($notification['message'], 0, 50)) . (strlen($notification['message']) > 50 ? '...' : ''); ?>
+                            </td>
+                            <td>
+                                <?php echo $notification['sent_date']; ?><br>
+                                <small><?php echo $notification['sent_time']; ?></small>
+                            </td>
+                            <td>
+                                <span class="status-badge status-<?php echo strtolower($notification['status']); ?>">
+                                    <?php echo $notification['status']; ?>
+                                </span>
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <!-- Resend Form -->
+                                    <form method="POST" action="notifications.php" style="display:inline;">
+                                        <input type="hidden" name="action" value="resend">
+                                        <input type="hidden" name="notification_id" value="<?php echo $notification['notification_id']; ?>">
+                                        <button type="submit" class="btn btn-small btn-resend" onclick="return confirm('Resend this notification?')">Resend</button>
+                                    </form>
+                                    
+                                    <!-- Delete Form -->
+                                    <?php if ($notification['status'] == 'Failed'): ?>
+                                    <form method="POST" action="notifications.php" style="display:inline;">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="notification_id" value="<?php echo $notification['notification_id']; ?>">
+                                        <button type="submit" class="btn btn-small btn-delete" onclick="return confirm('Delete this notification? This cannot be undone.')">Delete</button>
+                                    </form>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 </tbody>
             </table>
-            
-            <!-- Pagination -->
-            <div class="pagination">
-                <button onclick="changePage(1)" disabled>« Previous</button>
-                <button class="active" onclick="changePage(1)">1</button>
-                <button onclick="changePage(2)">2</button>
-                <button onclick="changePage(3)">3</button>
-                <button onclick="changePage(4)">4</button>
-                <button onclick="changePage(5)">5</button>
-                <button onclick="changePage(2)">Next »</button>
-            </div>
         </div>
     </div>
 
@@ -534,68 +472,5 @@
             <p>Powered by Compassion</p>
         </div>
     </footer>
-
-    <script>
-        // Filter functionality
-        function applyFilters() {
-            const recipientType = document.getElementById('recipient-type').value;
-            const notificationType = document.getElementById('notification-type').value;
-            const status = document.getElementById('status').value;
-            const dateFrom = document.getElementById('date-from').value;
-            const dateTo = document.getElementById('date-to').value;
-            
-            console.log('Applying filters:', {
-                recipientType,
-                notificationType,
-                status,
-                dateFrom,
-                dateTo
-            });
-            
-            // Here you would typically make an AJAX call to filter the notifications
-            alert('Filters applied! (This would filter the notifications in a real implementation)');
-        }
-        
-        // Notification actions
-        function viewNotification(id) {
-            alert(`Viewing notification #${id} details`);
-            // Here you would open a modal or navigate to a detailed view
-        }
-        
-        function resendNotification(id) {
-            if (confirm(`Are you sure you want to resend notification #${id}?`)) {
-                alert(`Resending notification #${id}...`);
-                // Here you would make an AJAX call to resend the notification
-            }
-        }
-        
-        function deleteNotification(id) {
-            if (confirm(`Are you sure you want to delete notification #${id}? This action cannot be undone.`)) {
-                alert(`Deleting notification #${id}...`);
-                // Here you would make an AJAX call to delete the notification
-            }
-        }
-        
-        function sendNewNotification() {
-            alert('Opening new notification form...');
-            // Here you would open a modal or navigate to a form to create a new notification
-        }
-        
-        function exportNotifications() {
-            alert('Exporting notifications to CSV...');
-            // Here you would trigger a download of the notifications data
-        }
-        
-        function changePage(page) {
-            console.log(`Changing to page ${page}`);
-            // Here you would make an AJAX call to load the new page of notifications
-        }
-        
-        // Auto-refresh functionality
-        setInterval(function() {
-            // Check for new notifications every 30 seconds
-            console.log('Checking for new notifications...');
-        }, 30000);
-    </script>
 </body>
 </html>
