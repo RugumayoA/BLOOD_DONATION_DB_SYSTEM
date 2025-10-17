@@ -1,73 +1,86 @@
 <?php
+session_start();
 require_once 'config.php';
+
+// Redirect to login if not authenticated as staff
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 // Handle form submission for creating new session
 if ($_POST && !isset($_POST['action'])) {
-    try {
-        $sql = "INSERT INTO donation_session (session_date, start_time, end_time, location, staff_id, status, max_donors, notes) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO donation_session (session_date, start_time, end_time, location, staff_id, status, max_donors, notes) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['sessionDate'],
-            $_POST['startTime'],
-            $_POST['endTime'],
-            $_POST['location'],
-            $_POST['staffId'],
-            $_POST['status'],
-            $_POST['maxDonors'],
-            $_POST['notes']
-        ));
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssssisss",
+        $_POST['sessionDate'],
+        $_POST['startTime'],
+        $_POST['endTime'],
+        $_POST['location'],
+        $_POST['staffId'],
+        $_POST['status'],
+        $_POST['maxDonors'],
+        $_POST['notes']
+    );
 
+    if ($stmt->execute()) {
         $success_message = "Donation session created successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle edit action
 if (isset($_POST['action']) && $_POST['action'] == 'edit') {
-    try {
-        $sql = "UPDATE donation_session SET session_date=?, start_time=?, end_time=?, location=?, staff_id=?, status=?, max_donors=?, notes=? WHERE session_id=?";
-
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['sessionDate'],
-            $_POST['startTime'],
-            $_POST['endTime'],
-            $_POST['location'],
-            $_POST['staffId'],
-            $_POST['status'],
-            $_POST['maxDonors'],
-            $_POST['notes'],
-            $_POST['sessionId']
-        ));
-
+    $sql = "UPDATE donation_session SET session_date=?, start_time=?, end_time=?, location=?, staff_id=?, status=?, max_donors=?, notes=? WHERE session_id=?";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssssisssi",
+        $_POST['sessionDate'],
+        $_POST['startTime'],
+        $_POST['endTime'],
+        $_POST['location'],
+        $_POST['staffId'],
+        $_POST['status'],
+        $_POST['maxDonors'],
+        $_POST['notes'],
+        $_POST['sessionId']
+    );
+    
+    if ($stmt->execute()) {
         $success_message = "Donation session updated successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle cancel action
 if (isset($_GET['action']) && $_GET['action'] == 'cancel' && isset($_GET['id'])) {
-    try {
-        $sql = "UPDATE donation_session SET status='Cancelled' WHERE session_id=?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array($_GET['id']));
+    $sql = "UPDATE donation_session SET status='Cancelled' WHERE session_id=?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    if ($stmt->execute()) {
         $success_message = "Donation session cancelled successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Get session for editing (if requested)
 $edit_session = null;
 if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
     $sql = "SELECT * FROM donation_session WHERE session_id=?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array($_GET['id']));
-    $edit_session = $stmt->fetch();
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $edit_session = $result->fetch_assoc();
+    $stmt->close();
 }
 
 // Get all donation sessions from database
@@ -75,15 +88,13 @@ $sql = "SELECT ds.*, s.first_name, s.last_name, s.employee_id
         FROM donation_session ds 
         LEFT JOIN staff s ON ds.staff_id = s.staff_id 
         ORDER BY ds.session_date DESC, ds.start_time";
-$stmt = $pdo->prepare($sql);
-$stmt->execute();
-$sessions = $stmt->fetchAll();
+$result = $conn->query($sql);
+$sessions = $result->fetch_all(MYSQLI_ASSOC);
 
 // Get all staff members for the dropdown
 $staff_sql = "SELECT staff_id, first_name, last_name, employee_id FROM staff WHERE status = 'Active' ORDER BY last_name, first_name";
-$staff_stmt = $pdo->prepare($staff_sql);
-$staff_stmt->execute();
-$staff_members = $staff_stmt->fetchAll();
+$staff_result = $conn->query($staff_sql);
+$staff_members = $staff_result->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -186,42 +197,222 @@ $staff_members = $staff_stmt->fetchAll();
         .btn-modal:hover {
             opacity: 0.9;
         }
+        
+        /* Dashboard-style layout */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: #fff;
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: #fff;
+            font-weight: 600;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 15px;
+        }
+        
+        .logout-btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: background 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
     </style>
 </head>
 
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation DMS">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php">Staff</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="sessions.php" class="active">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php">Notifications</a></li>
-                </ul>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item">
+                            Dashboard
+                        </a>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="events.php" class="nav-item">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item active">
+                            Sessions
+                        </a>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item">
+                            Notifications
+                        </a>
+            </div>
             </nav>
         </div>
-    </header>
-
-    <section class="page-title">
-        <div class="container">
-            <h1>Donation Sessions</h1>
+            
+            <div class="user-info">
+                <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                <div class="user-role">Staff Member</div>
+                <a href="logout.php" class="logout-btn">Logout</a>
+            </div>
         </div>
-    </section>
 
-    <main class="container">
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-area">
+                <div class="top-bar">
+                    <div>
+                        <span style="color: #333; font-size: 18px; font-weight: 500;">Sessions</span>
+                    </div>
+                </div>
         <!-- Success/Error Messages -->
         <?php if (isset($success_message)): ?>
             <div class="alert alert-success"><?php echo $success_message; ?></div>
@@ -401,6 +592,12 @@ $staff_members = $staff_stmt->fetchAll();
             }
         }
     </script>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
+<?php
+$conn->close();
+?>

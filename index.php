@@ -1,5 +1,12 @@
-\<?php
+<?php
+session_start();
 require_once 'config.php';
+
+// Redirect to login if not authenticated
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: landing.php');
+    exit;
+}
 
 // Fetch the next upcoming event
 $sql = "SELECT * FROM donation_event 
@@ -7,17 +14,203 @@ $sql = "SELECT * FROM donation_event
         AND event_date >= CURDATE() 
         ORDER BY event_date ASC, start_time ASC 
         LIMIT 1";
-$stmt = $pdo->prepare($sql);
-$stmt->execute();
-$upcoming_event = $stmt->fetch();
+$result = $conn->query($sql);
+$upcoming_event = $result->fetch_assoc();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blood Donors: Your Blood, Their Hope</title>
+    <title>Blood Donation DMS - Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Sidebar Navigation Styles */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: white;
+            transform: translateX(5px);
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: white;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .user-info {
+            padding: 15px 20px;
+            background: rgba(0,0,0,0.15);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 20px 0 0 0;
+        }
+        
+        .user-name {
+            font-weight: bold;
+            margin-bottom: 3px;
+            font-size: 14px;
+        }
+        
+        .user-role {
+            font-size: 11px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 8px;
+        }
+        
+        .logout-btn {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            background: #8B0000;
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            border-radius: 6px;
+            margin-top: 8px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            font-size: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .logout-btn:hover {
+            background: #A52A2A;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .main-content {
+            margin-left: 250px;
+            flex: 1;
+            background: #f5f5f5;
+        }
+        
+        .top-bar {
+            background: white;
+            padding: 15px 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .page-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            margin: 0;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 200px;
+            }
+            .main-content {
+                margin-left: 200px;
+            }
+            .user-info {
+                width: 200px;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
     <style>
         .upcoming-event-message {
             font-size: 0.95em;
@@ -45,31 +238,99 @@ $upcoming_event = $stmt->fetch();
     </style>
 </head>
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <!-- Inspired by the blood drop heart logo -->
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation Logo">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php" class="active">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php">Staff</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="sessions.php">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php">Notifications</a></li>
-                </ul>
-            </nav>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item active">
+                            Dashboard
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Events & Sessions</div>
+                        <a href="events.php" class="nav-item">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item">
+                            Sessions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Medical</div>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Reports & Analytics</div>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item">
+                            Notifications
+                        </a>
+                    </div>
+                    
+                    <div class="user-info">
+                        <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                        <div class="user-role">Staff Member</div>
+                        <a href="logout.php" class="logout-btn">🚪 Logout</a>
+                    </div>
+                </nav>
+            </div>
         </div>
-    </header>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <div class="top-bar" style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span style="color: #333; font-size: 18px; font-weight: 500;">Dashboard</span>
+                </div>
+                <div style="margin-right: 100px;">
+                    <span style="color: #666; font-size: 16px;">Welcome back, <?php echo htmlspecialchars($_SESSION['staff_name']); ?>!</span>
+                </div>
+            </div>
+            
+            <div class="content-area">
 
     <section class="hero-section">
         <div class="container">
@@ -80,7 +341,6 @@ $upcoming_event = $stmt->fetch();
                 <a href="donors.php" class="btn btn-primary">Become a Donor Today</a>
             </div>
             <div class="hero-image">
-                <!-- Placeholder for a graphic inspired by the blood bag/test tubes from the poster -->
                 <img src="images/hero-blood-elements.png" alt="Blood donation elements">
             </div>
         </div>
@@ -133,11 +393,11 @@ $upcoming_event = $stmt->fetch();
         </div>
     </section>
 
-    <footer class="main-footer">
-        <div class="container">
-            <p>&copy; <?php echo date("Y"); ?> Blood Donation DMS. All rights reserved.</p>
-            <p>Powered by Compassion</p>
-        </div>
-    </footer>
+            </div> <!-- End content-area -->
+        </div> <!-- End main-content -->
+    </div> <!-- End dashboard-container -->
 </body>
 </html>
+<?php
+$conn->close();
+?>

@@ -1,17 +1,20 @@
 <?php
 // WampServer 2.0 Database configuration
-$host = 'localhost';
-$dbname = 'blood_donation'; // Your database name
-$username = 'root'; // WampServer 2.0 default username
-$password = ''; // WampServer 2.0 default password (empty)
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "blood_donation";
 
-try {
-    // Create PDO connection for WampServer 2.0
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    echo "<!-- Database connection successful -->";
-} catch(PDOException $e) {
-    die("Connection failed: " . $e->getMessage());
+// Create MySQLi connection for WampServer 2.0
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
+
+// Set charset to utf8 for proper character encoding
+$conn->set_charset("utf8");
+
+echo "<!-- Database connection successful -->";
 ?>

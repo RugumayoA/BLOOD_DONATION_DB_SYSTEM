@@ -1,85 +1,98 @@
 <?php
+session_start();
 require_once 'config.php';
+
+// Redirect to login if not authenticated as staff
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 // Handle DELETE action
 if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
-    try {
-        $sql = "DELETE FROM donation_event WHERE event_id = ?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array($_GET['id']));
+    $sql = "DELETE FROM donation_event WHERE event_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    if ($stmt->execute()) {
         $success_message = "Event deleted successfully!";
-    } catch(PDOException $e) {
-        $error_message = "Error deleting event: " . $e->getMessage();
+    } else {
+        $error_message = "Error deleting event: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle UPDATE action
 if (isset($_POST['update_event'])) {
-    try {
-        $sql = "UPDATE donation_event SET 
-                event_name = ?, 
-                event_date = ?, 
-                start_time = ?, 
-                location = ?, 
-                staff_id = ?, 
-                number_of_participants = ?, 
-                status = ?, 
-                target_blood = ?, 
-                notes = ?
-                WHERE event_id = ?";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['eventName'],
-            $_POST['eventDate'],
-            $_POST['startTime'],
-            $_POST['location'],
-            $_POST['staffId'] ? $_POST['staffId'] : null,
-            $_POST['numberOfParticipants'] ? $_POST['numberOfParticipants'] : null,
-            $_POST['status'],
-            $_POST['targetBlood'] ? $_POST['targetBlood'] : null,
-            $_POST['notes'],
-            $_POST['event_id']
-        ));
-        
+    $sql = "UPDATE donation_event SET 
+            event_name = ?, 
+            event_date = ?, 
+            start_time = ?, 
+            location = ?, 
+            staff_id = ?, 
+            number_of_participants = ?, 
+            status = ?, 
+            target_blood = ?, 
+            notes = ?
+            WHERE event_id = ?";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssssiisssi",
+        $_POST['eventName'],
+        $_POST['eventDate'],
+        $_POST['startTime'],
+        $_POST['location'],
+        $_POST['staffId'] ? $_POST['staffId'] : null,
+        $_POST['numberOfParticipants'] ? $_POST['numberOfParticipants'] : null,
+        $_POST['status'],
+        $_POST['targetBlood'] ? $_POST['targetBlood'] : null,
+        $_POST['notes'],
+        $_POST['event_id']
+    );
+    
+    if ($stmt->execute()) {
         $success_message = "Event updated successfully!";
-    } catch(PDOException $e) {
-        $error_message = "Error updating event: " . $e->getMessage();
+    } else {
+        $error_message = "Error updating event: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle CREATE (INSERT) action
 if (isset($_POST['add_event'])) {
-    try {
-        $sql = "INSERT INTO donation_event (event_name, event_date, start_time, location, staff_id, number_of_participants, status, target_blood, notes) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['eventName'],
-            $_POST['eventDate'],
-            $_POST['startTime'],
-            $_POST['location'],
-            $_POST['staffId'] ? $_POST['staffId'] : null,
-            $_POST['numberOfParticipants'] ? $_POST['numberOfParticipants'] : null,
-            $_POST['status'],
-            $_POST['targetBlood'] ? $_POST['targetBlood'] : null,
-            $_POST['notes']
-        ));
-        
+    $sql = "INSERT INTO donation_event (event_name, event_date, start_time, location, staff_id, number_of_participants, status, target_blood, notes) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssssiisss",
+        $_POST['eventName'],
+        $_POST['eventDate'],
+        $_POST['startTime'],
+        $_POST['location'],
+        $_POST['staffId'] ? $_POST['staffId'] : null,
+        $_POST['numberOfParticipants'] ? $_POST['numberOfParticipants'] : null,
+        $_POST['status'],
+        $_POST['targetBlood'] ? $_POST['targetBlood'] : null,
+        $_POST['notes']
+    );
+    
+    if ($stmt->execute()) {
         $success_message = "Event added successfully!";
-    } catch(PDOException $e) {
-        $error_message = "Error adding event: " . $e->getMessage();
+    } else {
+        $error_message = "Error adding event: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Get event for editing
 $edit_event = null;
 if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
     $sql = "SELECT * FROM donation_event WHERE event_id = ?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array($_GET['id']));
-    $edit_event = $stmt->fetch();
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $edit_event = $result->fetch_assoc();
+    $stmt->close();
 }
 
 // READ - Get all events from database
@@ -87,9 +100,8 @@ $sql = "SELECT e.*, s.first_name, s.last_name
         FROM donation_event e 
         LEFT JOIN staff s ON e.staff_id = s.staff_id 
         ORDER BY e.event_date DESC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute();
-$events = $stmt->fetchAll();
+$result = $conn->query($sql);
+$events = $result->fetch_all(MYSQLI_ASSOC);
 
 // Get event statistics
 $stats_sql = "SELECT 
@@ -99,9 +111,8 @@ $stats_sql = "SELECT
     COUNT(CASE WHEN status = 'Completed' THEN 1 END) as completed_events,
     SUM(CASE WHEN status = 'Completed' THEN target_blood ELSE 0 END) as total_blood_collected
     FROM donation_event";
-$stats_stmt = $pdo->prepare($stats_sql);
-$stats_stmt->execute();
-$stats = $stats_stmt->fetch();
+$stats_result = $conn->query($stats_sql);
+$stats = $stats_result->fetch_assoc();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -111,6 +122,141 @@ $stats = $stats_stmt->fetch();
     <title>Donation Events - Blood Donation DMS</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Dashboard-style layout */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: #fff;
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: #fff;
+            font-weight: 600;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 15px;
+        }
+        
+        .logout-btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: background 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
         .events-stats {
             display: flex;
             gap: 20px;
@@ -231,38 +377,83 @@ $stats = $stats_stmt->fetch();
     </style>
 </head>
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation DMS">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php">Staff</a></li>
-                    <li><a href="events.php" class="active">Events</a></li>
-                    <li><a href="sessions.php">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php">Notifications</a></li>
-                </ul>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item">
+                            Dashboard
+                        </a>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="events.php" class="nav-item active">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item">
+                            Sessions
+                        </a>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item">
+                            Notifications
+                        </a>
+            </div>
             </nav>
         </div>
-    </header>
-
-    <section class="page-title">
-        <div class="container">
-            <h1>Donation Events</h1>
+            
+            <div class="user-info">
+                <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                <div class="user-role">Staff Member</div>
+                <a href="logout.php" class="logout-btn">Logout</a>
+            </div>
         </div>
-    </section>
 
-    <main class="container">
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-area">
+                <div class="top-bar">
+                    <div>
+                        <span style="color: #333; font-size: 18px; font-weight: 500;">Events</span>
+                    </div>
+                </div>
         <!-- Statistics Section -->
         <div class="events-stats">
             <div class="stat-card">
@@ -468,5 +659,11 @@ $stats = $stats_stmt->fetch();
         });
         <?php endif; ?>
     </script>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
+<?php
+$conn->close();
+?>

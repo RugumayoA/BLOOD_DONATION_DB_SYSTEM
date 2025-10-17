@@ -187,18 +187,22 @@ CREATE TABLE IF NOT EXISTS `staff` (
   `first_name` varchar(100) NOT NULL,
   `last_name` varchar(100) NOT NULL,
   `employee_id` varchar(50) NOT NULL,
+  `username` varchar(50) NOT NULL,
   `position` varchar(100) DEFAULT NULL,
   `department` varchar(100) DEFAULT NULL,
   `phone_number` varchar(30) DEFAULT NULL,
   `email` varchar(255) DEFAULT NULL,
+  `password` varchar(255) DEFAULT NULL,
   `hire_date` date DEFAULT NULL,
   `status` enum('Active','Inactive','On Leave') DEFAULT 'Active',
   `qualifications` text,
   `license_number` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`staff_id`),
   UNIQUE KEY `uq_staff_employee` (`employee_id`),
+  UNIQUE KEY `uq_staff_username` (`username`),
   UNIQUE KEY `uq_staff_email` (`email`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 AUTO_INCREMENT=1 ;
+
 
 
 -- Table structure for table `testing_record`
@@ -216,3 +220,27 @@ CREATE TABLE IF NOT EXISTS `testing_record` (
   KEY `idx_tr_donation` (`donation_id`),
   KEY `idx_tr_staff` (`staff_id`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 AUTO_INCREMENT=1 ;
+
+
+-- Junction table for many-to-many relationship between donation_event and staff
+CREATE TABLE IF NOT EXISTS `event_staff` (
+  `event_id` int(10) unsigned NOT NULL,
+  `staff_id` int(10) unsigned NOT NULL,
+  `role` varchar(100) DEFAULT 'Staff',
+  `assigned_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`event_id`, `staff_id`),
+  KEY `idx_es_event` (`event_id`),
+  KEY `idx_es_staff` (`staff_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+
+
+-- Junction table for many-to-many relationship between donation_event and donor
+CREATE TABLE IF NOT EXISTS `event_donor` (
+  `event_id` int(10) unsigned NOT NULL,
+  `donor_id` int(10) unsigned NOT NULL,
+  `registration_date` datetime DEFAULT NULL,
+  `attendance_status` enum('Registered','Present','Absent') DEFAULT 'Registered',
+  PRIMARY KEY (`event_id`, `donor_id`),
+  KEY `idx_ed_event` (`event_id`),
+  KEY `idx_ed_donor` (`donor_id`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1;

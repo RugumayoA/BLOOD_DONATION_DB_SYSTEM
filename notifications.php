@@ -1,7 +1,14 @@
 <?php
+session_start();
 // Include database connection
 require_once 'config.php';
 require_once 'email_helper.php';
+
+// Redirect to login if not authenticated as staff
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 // Handle CRUD operations
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -13,8 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $sql = "INSERT INTO notification (recipient_type, recipient_id, notification_type, title, message, sent_date, sent_time, status, delivery_method) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
             
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute(array(
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("siissssss",
                 $_POST['recipient_type'],
                 $_POST['recipient_id'],
                 $_POST['notification_type'],
@@ -24,18 +31,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 date('H:i:s'),
                 'Queued',
                 $_POST['notification_type']
-            ));
+            );
             
-            $success_message = "Notification sent successfully!";
+            if ($stmt->execute()) {
+                $success_message = "Notification sent successfully!";
+            } else {
+                $error_message = "Error: " . $conn->error;
+            }
+            $stmt->close();
         }
         
         // UPDATE: Resend notification
         if ($action == 'resend' && isset($_POST['notification_id'])) {
             // Get notification details
             $notif_sql = "SELECT * FROM notification WHERE notification_id = ?";
-            $notif_stmt = $pdo->prepare($notif_sql);
-            $notif_stmt->execute(array($_POST['notification_id']));
-            $notification = $notif_stmt->fetch();
+            $notif_stmt = $conn->prepare($notif_sql);
+            $notif_stmt->bind_param("i", $_POST['notification_id']);
+            $notif_stmt->execute();
+            $result = $notif_stmt->get_result();
+            $notification = $result->fetch_assoc();
+            $notif_stmt->close();
             
             if ($notification) {
                 // Get recipient email address based on type
@@ -50,9 +65,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $email_sql = "SELECT email, first_name, last_name FROM staff WHERE staff_id = ?";
                 }
                 
-                $email_stmt = $pdo->prepare($email_sql);
-                $email_stmt->execute(array($notification['recipient_id']));
-                $recipient_data = $email_stmt->fetch();
+                $email_stmt = $conn->prepare($email_sql);
+                $email_stmt->bind_param("i", $notification['recipient_id']);
+                $email_stmt->execute();
+                $result = $email_stmt->get_result();
+                $recipient_data = $result->fetch_assoc();
+                $email_stmt->close();
                 
                 if ($recipient_data) {
                     $email = $recipient_data['email'];
@@ -79,13 +97,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         SET status = ?, sent_date = ?, sent_time = ? 
                         WHERE notification_id = ?";
                 
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute(array(
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("sssi",
                     $status,
                     date('Y-m-d'),
                     date('H:i:s'),
                     $_POST['notification_id']
-                ));
+                );
+                $stmt->execute();
+                $stmt->close();
                 
                 if ($status == 'Sent') {
                     $success_message = "Notification resent successfully to " . htmlspecialchars($email) . "!";
@@ -99,22 +119,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if ($action == 'delete' && isset($_POST['notification_id'])) {
             $sql = "DELETE FROM notification WHERE notification_id = ?";
             
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute(array($_POST['notification_id']));
-            
-            $success_message = "Notification deleted successfully!";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param("i", $_POST['notification_id']);
+            if ($stmt->execute()) {
+                $success_message = "Notification deleted successfully!";
+            } else {
+                $error_message = "Error: " . $conn->error;
+            }
+            $stmt->close();
         }
-        
-    } catch(PDOException $e) {
+    } catch (Exception $e) {
         $error_message = "Error: " . $e->getMessage();
     }
 }
 
 // READ: Get all notifications
 $sql = "SELECT * FROM notification ORDER BY sent_date DESC, sent_time DESC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute();
-$notifications = $stmt->fetchAll();
+$result = $conn->query($sql);
+$notifications = $result->fetch_all(MYSQLI_ASSOC);
 
 // READ: Get statistics
 $stats_sql = "SELECT 
@@ -123,9 +145,8 @@ $stats_sql = "SELECT
     SUM(CASE WHEN status = 'Sent' THEN 1 ELSE 0 END) as sent,
     SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed
     FROM notification";
-$stats_stmt = $pdo->prepare($stats_sql);
-$stats_stmt->execute();
-$stats = $stats_stmt->fetch();
+$stats_result = $conn->query($stats_sql);
+$stats = $stats_result->fetch_assoc();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -135,6 +156,141 @@ $stats = $stats_stmt->fetch();
     <title>Notifications - Blood Donation DMS</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Dashboard-style layout */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: #fff;
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: #fff;
+            font-weight: 600;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 15px;
+        }
+        
+        .logout-btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: background 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
         /* Additional styles for notifications page */
         .notifications-container {
             max-width: 1400px;
@@ -363,34 +519,81 @@ $stats = $stats_stmt->fetch();
     </style>
 </head>
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation DMS">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php">Staff</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="sessions.php">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php" class="active">Notifications</a></li>
-                </ul>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item">
+                            Dashboard
+                        </a>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="events.php" class="nav-item">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item">
+                            Sessions
+                        </a>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item active">
+                            Notifications
+                        </a>
+                    </div>
             </nav>
         </div>
-    </header>
+            
+            <div class="user-info">
+                <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                <div class="user-role">Staff Member</div>
+                <a href="logout.php" class="logout-btn">Logout</a>
+            </div>
+        </div>
 
-    <div class="page-title">
-        <div class="container">
-            <h1>Notification Management</h1>
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-area">
+                <div class="top-bar">
+                    <div>
+                        <span style="color: #333; font-size: 18px; font-weight: 500;">Notifications</span>
         </div>
     </div>
 
@@ -531,5 +734,11 @@ $stats = $stats_stmt->fetch();
             <p>Powered by Compassion</p>
         </div>
     </footer>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
+<?php
+$conn->close();
+?>

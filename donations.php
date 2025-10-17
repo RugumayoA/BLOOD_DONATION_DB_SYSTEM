@@ -1,6 +1,12 @@
 <?php
-// donations.php
+session_start();
 require_once 'config.php';
+
+// Redirect to login if not authenticated as staff
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 $flash_ok = null;
 $flash_err = null;
@@ -8,45 +14,55 @@ $flash_err = null;
 // Handle delete action
 if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
     $id = (int)$_GET['id'];
+    
+    // Start transaction
+    $conn->autocommit(FALSE);
+    
     try {
-        // Start transaction
-        $pdo->beginTransaction();
-        
         // Delete from inventory first (foreign key dependency)
-        $stmt = $pdo->prepare("DELETE FROM blood_inventory WHERE donation_id = ?");
-        $stmt->execute(array($id));
+        $stmt = $conn->prepare("DELETE FROM blood_inventory WHERE donation_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
         
         // Delete from testing_record
-        $stmt = $pdo->prepare("DELETE FROM testing_record WHERE donation_id = ?");
-        $stmt->execute(array($id));
+        $stmt = $conn->prepare("DELETE FROM testing_record WHERE donation_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
         
         // Delete the donation record
-        $stmt = $pdo->prepare("DELETE FROM donation_record WHERE donation_id = ?");
-        $stmt->execute(array($id));
+        $stmt = $conn->prepare("DELETE FROM donation_record WHERE donation_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
         
-        $pdo->commit();
+        $conn->commit();
         header("Location: donations.php?ok=deleted");
         exit;
-    } catch (PDOException $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
+    } catch (Exception $e) {
+        $conn->rollback();
         $flash_err = "Delete failed: " . $e->getMessage();
     }
+    
+    $conn->autocommit(TRUE);
 }
 
 // Get record for editing
 $edit_row = null;
 if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) {
     $id = (int)$_GET['id'];
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM donation_record WHERE donation_id = ?");
-        $stmt->execute(array($id));
-        $edit_row = $stmt->fetch();
-    } catch (PDOException $e) {
-        $flash_err = "Error fetching record: " . $e->getMessage();
-    }
+    $stmt = $conn->prepare("SELECT * FROM donation_record WHERE donation_id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $edit_row = $result->fetch_assoc();
+    $stmt->close();
 }
+
+// Fetch all donors for dropdown
+$donorsSql = "SELECT donor_id, first_name, last_name, blood_type FROM donor ORDER BY first_name, last_name";
+$donorsResult = $conn->query($donorsSql);
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -64,42 +80,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bagCode = $_POST['bagCode'];
     $notes = !empty($_POST['notes']) ? $_POST['notes'] : null;
 
+    // Begin transaction to ensure both donation and inventory are updated together
+    $conn->autocommit(FALSE);
+    
     try {
-        // Begin transaction to ensure both donation and inventory are updated together
-        $pdo->beginTransaction();
-        
         if ($mode === 'update' && $donationId > 0) {
             // Update existing donation record
-            $stmt = $pdo->prepare("UPDATE donation_record SET donor_id = ?, session_id = ?, donation_date = ?, blood_volume_ml = ?, hemoglobin_level = ?, blood_pressure = ?, pulse_rate = ?, temperature = ?, staff_id = ?, bag_code = ?, notes = ? WHERE donation_id = ?");
-            $stmt->execute(array($donorId, $sessionId, $donationDate, $bloodVolumeMl, $hemoglobinLevel, $bloodPressure, $pulseRate, $temperature, $staffId, $bagCode, $notes, $donationId));
+            $stmt = $conn->prepare("UPDATE donation_record SET donor_id = ?, session_id = ?, donation_date = ?, blood_volume_ml = ?, hemoglobin_level = ?, blood_pressure = ?, pulse_rate = ?, temperature = ?, staff_id = ?, bag_code = ?, notes = ? WHERE donation_id = ?");
+            $stmt->bind_param("iisssssssssi", $donorId, $sessionId, $donationDate, $bloodVolumeMl, $hemoglobinLevel, $bloodPressure, $pulseRate, $temperature, $staffId, $bagCode, $notes, $donationId);
+            $stmt->execute();
+            $stmt->close();
             
             // Update inventory if it exists
-            $stmtCheck = $pdo->prepare("SELECT inventory_id FROM blood_inventory WHERE donation_id = ?");
-            $stmtCheck->execute(array($donationId));
-            if ($stmtCheck->fetch()) {
+            $stmtCheck = $conn->prepare("SELECT inventory_id FROM blood_inventory WHERE donation_id = ?");
+            $stmtCheck->bind_param("i", $donationId);
+            $stmtCheck->execute();
+            $result = $stmtCheck->get_result();
+            if ($result->fetch_assoc()) {
                 // Update existing inventory
                 $collectionDate = date('Y-m-d', strtotime($donationDate));
                 $expiryDate = date('Y-m-d', strtotime($collectionDate . ' + 42 days'));
                 
-                $stmtInventory = $pdo->prepare("UPDATE blood_inventory SET quantity_ml = ?, collection_date = ?, expiry_date = ? WHERE donation_id = ?");
-                $stmtInventory->execute(array($bloodVolumeMl, $collectionDate, $expiryDate, $donationId));
+                $stmtInventory = $conn->prepare("UPDATE blood_inventory SET quantity_ml = ?, collection_date = ?, expiry_date = ? WHERE donation_id = ?");
+                $stmtInventory->bind_param("issi", $bloodVolumeMl, $collectionDate, $expiryDate, $donationId);
+                $stmtInventory->execute();
+                $stmtInventory->close();
             }
+            $stmtCheck->close();
             
-            $pdo->commit();
+            $conn->commit();
             header("Location: donations.php?ok=updated");
             exit;
         } else {
             // Insert new donation record
-            $stmt = $pdo->prepare("INSERT INTO donation_record (donor_id, session_id, donation_date, blood_volume_ml, hemoglobin_level, blood_pressure, pulse_rate, temperature, staff_id, bag_code, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute(array($donorId, $sessionId, $donationDate, $bloodVolumeMl, $hemoglobinLevel, $bloodPressure, $pulseRate, $temperature, $staffId, $bagCode, $notes));
+            $stmt = $conn->prepare("INSERT INTO donation_record (donor_id, session_id, donation_date, blood_volume_ml, hemoglobin_level, blood_pressure, pulse_rate, temperature, staff_id, bag_code, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("iisssssssss", $donorId, $sessionId, $donationDate, $bloodVolumeMl, $hemoglobinLevel, $bloodPressure, $pulseRate, $temperature, $staffId, $bagCode, $notes);
+            $stmt->execute();
             
             // Get the donation ID that was just created
-            $newDonationId = $pdo->lastInsertId();
+            $newDonationId = $conn->insert_id;
+            $stmt->close();
             
             // Get the donor's blood type
-            $stmtDonor = $pdo->prepare("SELECT blood_type FROM donor WHERE donor_id = ?");
-            $stmtDonor->execute(array($donorId));
-            $donor = $stmtDonor->fetch();
+            $stmtDonor = $conn->prepare("SELECT blood_type FROM donor WHERE donor_id = ?");
+            $stmtDonor->bind_param("i", $donorId);
+            $stmtDonor->execute();
+            $result = $stmtDonor->get_result();
+            $donor = $result->fetch_assoc();
+            $stmtDonor->close();
             
             if ($donor) {
                 // Calculate expiry date (42 days from collection date - standard for whole blood)
@@ -107,26 +135,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $expiryDate = date('Y-m-d', strtotime($collectionDate . ' + 42 days'));
                 
                 // Automatically add to inventory with "Quarantined" status until tested
-                $stmtInventory = $pdo->prepare("INSERT INTO blood_inventory (donation_id, blood_type, quantity_ml, collection_date, expiry_date, status, storage_location) VALUES (?, ?, ?, ?, ?, 'Quarantined', 'Storage Area 1')");
-                $stmtInventory->execute(array($newDonationId, $donor['blood_type'], $bloodVolumeMl, $collectionDate, $expiryDate));
+                $stmtInventory = $conn->prepare("INSERT INTO blood_inventory (donation_id, blood_type, quantity_ml, collection_date, expiry_date, status, storage_location) VALUES (?, ?, ?, ?, ?, 'Quarantined', 'Storage Area 1')");
+                $stmtInventory->bind_param("isiss", $newDonationId, $donor['blood_type'], $bloodVolumeMl, $collectionDate, $expiryDate);
+                $stmtInventory->execute();
+                $stmtInventory->close();
                 
                 // Commit the transaction
-                $pdo->commit();
+                $conn->commit();
                 header("Location: donations.php?ok=created");
                 exit;
             } else {
                 // Rollback if donor not found
-                $pdo->rollBack();
+                $conn->rollback();
                 $flash_err = "Error: Donor not found!";
             }
         }
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         // Rollback on any error
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
+        $conn->rollback();
         $flash_err = "Error: " . $e->getMessage();
     }
+    
+    $conn->autocommit(TRUE);
 }
 
 // Handle flash messages
@@ -145,6 +175,141 @@ if (isset($_GET['ok'])) {
     <title>Donation Records - Blood Donation DMS</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Dashboard-style layout */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: #fff;
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: #fff;
+            font-weight: 600;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 15px;
+        }
+        
+        .logout-btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: background 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
     .alert{padding:10px;border-radius:6px;margin:10px 0;position:relative;overflow:hidden}
     .alert.success{background:#e6ffed;border:1px solid #a7f3d0;color:#065f46}
     .alert.danger{background:#ffe6e6;border:1px solid #ffb3b3;color:#7f1d1d}
@@ -156,37 +321,96 @@ if (isset($_GET['ok'])) {
     </style>
 </head>
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation Logo">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php" class="active">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php">Staff</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="sessions.php">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php">Notifications</a></li>
-                </ul>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item">
+                            Dashboard
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item active">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Events & Sessions</div>
+                        <a href="events.php" class="nav-item">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item">
+                            Sessions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Medical</div>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Reports & Analytics</div>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item">
+                            Notifications
+                        </a>
+                    </div>
+                    
+                    <div class="user-info">
+                        <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                        <div class="user-role">Staff Member</div>
+                        <a href="logout.php" class="logout-btn">🚪 Logout</a>
+            </div>
             </nav>
         </div>
-    </header>
-
-    <section class="page-title">
-        <div class="container">
-            <h1>Donation Records</h1>
         </div>
-    </section>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <div class="top-bar">
+                <div>
+                    <span style="color: #333; font-size: 18px; font-weight: 500;">Donations</span>
+                </div>
+        </div>
 
+            <div class="content-area">
     <main class="container">
         <?php if ($flash_ok): ?>
             <div class="alert success"><?php echo htmlspecialchars($flash_ok); ?><div class="bar"></div></div>
@@ -213,8 +437,8 @@ if (isset($_GET['ok'])) {
                     </thead>
                     <tbody>
                         <?php
-                        $stmt = $pdo->query("SELECT * FROM donation_record ORDER BY donation_id DESC");
-                        while ($row = $stmt->fetch()) {
+                        $result = $conn->query("SELECT * FROM donation_record ORDER BY donation_id DESC");
+                        while ($row = $result->fetch_assoc()) {
                             echo "<tr>";
                             echo "<td>" . $row['donation_id'] . "</td>";
                             echo "<td>" . $row['donor_id'] . "</td>";
@@ -245,9 +469,21 @@ if (isset($_GET['ok'])) {
                 <?php endif; ?>
 
                 <div class="form-group">
-                    <label for="donorId">Donor ID</label>
-                    <input type="number" id="donorId" name="donorId" required
-                           value="<?php echo $edit_row ? (int)$edit_row['donor_id'] : ''; ?>">
+                    <label for="donorId">Select Donor</label>
+                    <select id="donorId" name="donorId" required>
+                        <option value="">Select Donor</option>
+                        <?php
+                        if ($donorsResult && $donorsResult->num_rows > 0) {
+                            while($donor = $donorsResult->fetch_assoc()) {
+                                $bloodTypeDisplay = $donor["blood_type"] ? $donor["blood_type"] : "Unknown";
+                                $selected = ($edit_row && $edit_row['donor_id'] == $donor['donor_id']) ? 'selected' : '';
+                                echo "<option value='" . $donor["donor_id"] . "' data-bloodtype='" . $donor["blood_type"] . "' $selected>";
+                                echo $donor["first_name"] . " " . $donor["last_name"] . " - " . $bloodTypeDisplay . " (ID: " . $donor["donor_id"] . ")";
+                                echo "</option>";
+                            }
+                        }
+                        ?>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="sessionId">Session ID (Optional)</label>
@@ -317,5 +553,11 @@ if (isset($_GET['ok'])) {
             <p>Powered by Compassion</p>
         </div>
     </footer>
+            </div> <!-- End content-area -->
+        </div> <!-- End main-content -->
+    </div> <!-- End dashboard-container -->
 </body>
 </html>
+<?php
+$conn->close();
+?>

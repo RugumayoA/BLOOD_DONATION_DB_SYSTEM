@@ -1,86 +1,113 @@
 <?php
-require_once 'config.php';
+session_start();
+
+// Database connection
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "blood_donation";
+
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Redirect to login if not authenticated as staff
+if (!isset($_SESSION['staff_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 // Handle form submission for adding new staff
 if ($_POST && !isset($_POST['action'])) {
-    try {
-        $sql = "INSERT INTO staff (first_name, last_name, employee_id, position, department, phone_number, email, hire_date, status, qualifications, license_number) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    // Hash the password
+    $password_hash = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    
+    $sql = "INSERT INTO staff (first_name, last_name, employee_id, position, department, phone_number, email, password, hire_date, status, qualifications, license_number) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['firstName'],
-            $_POST['lastName'],
-            $_POST['employeeId'],
-            $_POST['position'],
-            $_POST['department'],
-            $_POST['phoneNumber'],
-            $_POST['email'],
-            $_POST['hireDate'],
-            $_POST['status'],
-            $_POST['qualifications'],
-            $_POST['licenseNumber']
-        ));
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssssssssssss", 
+        $_POST['firstName'],
+        $_POST['lastName'],
+        $_POST['employeeId'],
+        $_POST['position'],
+        $_POST['department'],
+        $_POST['phoneNumber'],
+        $_POST['email'],
+        $password_hash,
+        $_POST['hireDate'],
+        $_POST['status'],
+        $_POST['qualifications'],
+        $_POST['licenseNumber']
+    );
 
+    if ($stmt->execute()) {
         $success_message = "Staff member added successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle edit action
 if (isset($_POST['action']) && $_POST['action'] == 'edit') {
-    try {
-        $sql = "UPDATE staff SET first_name=?, last_name=?, employee_id=?, position=?, department=?, phone_number=?, email=?, hire_date=?, status=?, qualifications=?, license_number=? WHERE staff_id=?";
+    $sql = "UPDATE staff SET first_name=?, last_name=?, employee_id=?, position=?, department=?, phone_number=?, email=?, hire_date=?, status=?, qualifications=?, license_number=? WHERE staff_id=?";
 
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array(
-            $_POST['firstName'],
-            $_POST['lastName'],
-            $_POST['employeeId'],
-            $_POST['position'],
-            $_POST['department'],
-            $_POST['phoneNumber'],
-            $_POST['email'],
-            $_POST['hireDate'],
-            $_POST['status'],
-            $_POST['qualifications'],
-            $_POST['licenseNumber'],
-            $_POST['staffId']
-        ));
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("sssssssssssi",
+        $_POST['firstName'],
+        $_POST['lastName'],
+        $_POST['employeeId'],
+        $_POST['position'],
+        $_POST['department'],
+        $_POST['phoneNumber'],
+        $_POST['email'],
+        $_POST['hireDate'],
+        $_POST['status'],
+        $_POST['qualifications'],
+        $_POST['licenseNumber'],
+        $_POST['staffId']
+    );
 
+    if ($stmt->execute()) {
         $success_message = "Staff member updated successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Handle delete action
 if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
-    try {
-        $sql = "DELETE FROM staff WHERE staff_id=?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array($_GET['id']));
+    $sql = "DELETE FROM staff WHERE staff_id=?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    if ($stmt->execute()) {
         $success_message = "Staff member deleted successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error: " . $e->getMessage();
+    } else {
+        $error_message = "Error: " . $conn->error;
     }
+    $stmt->close();
 }
 
 // Get staff member for editing (if requested)
 $edit_staff = null;
 if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
     $sql = "SELECT * FROM staff WHERE staff_id=?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array($_GET['id']));
-    $edit_staff = $stmt->fetch();
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $_GET['id']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $edit_staff = $result->fetch_assoc();
+    $stmt->close();
 }
 
 // Get all staff members from database
 $sql = "SELECT * FROM staff ORDER BY last_name, first_name";
-$stmt = $pdo->prepare($sql);
-$stmt->execute();
-$staff_members = $stmt->fetchAll();
+$result = $conn->query($sql);
+$staff_members = $result->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -91,6 +118,141 @@ $staff_members = $stmt->fetchAll();
     <title>Staff Management - Blood Donation DMS</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Dashboard-style layout */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: linear-gradient(180deg, #E21C3D 0%, #8B0000 100%);
+            color: white;
+            position: fixed;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar-header img {
+            width: 50px;
+            height: 50px;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        
+        .nav-section-title {
+            padding: 0 20px 10px 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.7);
+            letter-spacing: 1px;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 12px 20px;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.1);
+            border-left-color: #fff;
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.2);
+            border-left-color: #fff;
+            font-weight: 600;
+        }
+        
+        .nav-item i {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .user-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 15px;
+        }
+        
+        .logout-btn {
+            display: inline-block;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 12px;
+            transition: background 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            flex: 1;
+            margin-left: 250px;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
         .alert {
             padding: 15px;
             margin-bottom: 20px;
@@ -187,37 +349,96 @@ $staff_members = $stmt->fetchAll();
 </head>
 
 <body>
-    <header class="main-header">
-        <div class="container">
-            <div class="logo">
-                <img src="images/blood-drop-heart-logo.png" alt="Donate Blood Logo">
-                <h1>Blood Donation DMS</h1>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="images/blood-drop-heart-logo.png" alt="Blood Donation Logo">
+                <h2>Blood Donation DMS</h2>
             </div>
-            <nav class="main-nav">
-                <ul>
-                    <li><a href="index.php">Home</a></li>
-                    <li><a href="donors.php">Donors</a></li>
-                    <li><a href="recipients.php">Recipients</a></li>
-                    <li><a href="donations.php">Donations</a></li>
-                    <li><a href="requests.php">Requests</a></li>
-                    <li><a href="inventory.php">Inventory</a></li>
-                    <li><a href="staff.php" class="active">Staff</a></li>
-                    <li><a href="events.php">Events</a></li>
-                    <li><a href="sessions.php">Sessions</a></li>
-                    <li><a href="testing.php">Testing</a></li>
-                    <li><a href="transfusions.php">Transfusions</a></li>
-                    <li><a href="notifications.php">Notifications</a></li>
-                </ul>
+            
+            <div class="sidebar-content">
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-section-title">Main</div>
+                        <a href="index.php" class="nav-item">
+                            Dashboard
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Management</div>
+                        <a href="donors.php" class="nav-item">
+                            Donors
+                        </a>
+                        <a href="recipients.php" class="nav-item">
+                            Recipients
+                        </a>
+                        <a href="donations.php" class="nav-item">
+                            <i>🩸</i> Donations
+                        </a>
+                        <a href="requests.php" class="nav-item">
+                            Blood Requests
+                        </a>
+                        <a href="inventory.php" class="nav-item">
+                            Inventory
+                        </a>
+                        <a href="staff.php" class="nav-item active">
+                            Staff
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Events & Sessions</div>
+                        <a href="events.php" class="nav-item">
+                            Events
+                        </a>
+                        <a href="sessions.php" class="nav-item">
+                            Sessions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Medical</div>
+                        <a href="testing.php" class="nav-item">
+                            Testing
+                        </a>
+                        <a href="transfusions.php" class="nav-item">
+                            Transfusions
+                        </a>
+                    </div>
+                    
+                    <div class="nav-section">
+                        <div class="nav-section-title">Reports & Analytics</div>
+                        <a href="insights.php" class="nav-item">
+                            <i>📊</i> Insights
+                        </a>
+                        <a href="reports.php" class="nav-item">
+                            Reports
+                        </a>
+                        <a href="notifications.php" class="nav-item">
+                            Notifications
+                        </a>
+                    </div>
+                    
+                    <div class="user-info">
+                        <div class="user-name"><?php echo htmlspecialchars($_SESSION['staff_name']); ?></div>
+                        <div class="user-role">Staff Member</div>
+                        <a href="logout.php" class="logout-btn">🚪 Logout</a>
+            </div>
             </nav>
         </div>
-    </header>
-
-    <section class="page-title">
-        <div class="container">
-            <h1>Staff Management</h1>
         </div>
-    </section>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <div class="top-bar">
+                <div>
+                    <span style="color: #333; font-size: 18px; font-weight: 500;">Staff</span>
+                </div>
+        </div>
 
+            <div class="content-area">
     <main class="container">
         <!-- Success/Error Messages -->
         <?php if (isset($success_message)): ?>
@@ -308,6 +529,12 @@ $staff_members = $stmt->fetchAll();
                     <label for="email">Email</label>
                     <input type="email" id="email" name="email" value="<?php echo $edit_staff ? htmlspecialchars($edit_staff['email']) : ''; ?>">
                 </div>
+                <?php if (!$edit_staff): ?>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <?php endif; ?>
                 <div class="form-group">
                     <label for="hireDate">Hire Date</label>
                     <input type="date" id="hireDate" name="hireDate" value="<?php echo $edit_staff ? htmlspecialchars($edit_staff['hire_date']) : ''; ?>">
@@ -392,6 +619,11 @@ $staff_members = $stmt->fetchAll();
             }
         }
     </script>
+            </div> <!-- End content-area -->
+        </div> <!-- End main-content -->
+    </div> <!-- End dashboard-container -->
 </body>
-
 </html>
+<?php
+$conn->close();
+?>
