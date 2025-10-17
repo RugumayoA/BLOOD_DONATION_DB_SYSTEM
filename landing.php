@@ -453,7 +453,7 @@
         <!-- Welcome Banner -->
         <div class="welcome-banner">
             <div class="scrolling-text">
-                Hi, Welcome to our Blood Donation Database Management System V1.0 - Save Lives, Donate Blood! 🩸
+                Hi, Welcome to our Blood Donation Database Management System - Save Lives, Donate Blood! 🩸
             </div>
         </div>
 
