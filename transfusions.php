@@ -559,8 +559,8 @@ body {
 
 <footer class="main-footer">
   <div class="container">
-    <p>&copy; <?php echo date("Y"); ?> Blood Donation System. All rights reserved.</p>
-    <p>Powered by Group-G</p>
+    <p>&copy; <?php echo date("Y"); ?> Blood Donation Database Management System. All rights reserved.</p>
+    <p>Powered by Group G</p>
   </div>
 </footer>
         </div>

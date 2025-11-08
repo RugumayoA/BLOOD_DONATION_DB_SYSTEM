@@ -191,9 +191,9 @@ function send_notification_email($to, $recipient_name, $title, $message) {
                 </p>
             </div>
             <div class='footer'>
-                <p>&copy; " . date('Y') . " Blood Donation DMS. All rights reserved.</p>
+                <p>&copy; " . date('Y') . " Blood Donation Database Management System. All rights reserved.</p>
                 <p>This is an automated message. Please do not reply to this email.</p>
-                <p style='margin-top: 10px;'>Powered by Compassion</p>
+                <p style='margin-top: 10px;'>Powered by Group G</p>
             </div>
         </div>
     </body>

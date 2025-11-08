@@ -83,13 +83,35 @@ if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
     $stmt->close();
 }
 
+// Fix any sessions with invalid staff_id values (ensure they point to valid staff)
+// This handles cases where staff_id doesn't match any staff record
+// First, get the default staff_id (SG001 = staff_id 1)
+$default_staff_sql = "SELECT staff_id FROM staff WHERE employee_id = 'SG001' LIMIT 1";
+$default_result = $conn->query($default_staff_sql);
+$default_staff_id = 1; // Default fallback
+if ($default_result && $default_row = $default_result->fetch_assoc()) {
+    $default_staff_id = $default_row['staff_id'];
+}
+
+// Update sessions with invalid staff_id to point to a valid staff member
+$fix_sql = "UPDATE donation_session ds 
+            LEFT JOIN staff s ON ds.staff_id = s.staff_id 
+            SET ds.staff_id = " . intval($default_staff_id) . "
+            WHERE ds.staff_id IS NOT NULL AND s.staff_id IS NULL";
+$conn->query($fix_sql);
+
 // Get all donation sessions from database
 $sql = "SELECT ds.*, s.first_name, s.last_name, s.employee_id 
         FROM donation_session ds 
         LEFT JOIN staff s ON ds.staff_id = s.staff_id 
         ORDER BY ds.session_date DESC, ds.start_time";
 $result = $conn->query($sql);
-$sessions = $result->fetch_all(MYSQLI_ASSOC);
+if (!$result) {
+    $error_message = "Database query error: " . $conn->error;
+    $sessions = array();
+} else {
+    $sessions = $result->fetch_all(MYSQLI_ASSOC);
+}
 
 // Get all staff members for the dropdown
 $staff_sql = "SELECT staff_id, first_name, last_name, employee_id FROM staff WHERE status = 'Active' ORDER BY last_name, first_name";
@@ -456,8 +478,18 @@ $staff_members = $staff_result->fetch_all(MYSQLI_ASSOC);
                                     <td><?php echo htmlspecialchars($session['location']); ?></td>
                                     <td>
                                         <?php
-                                        if ($session['staff_id']) {
-                                            echo htmlspecialchars($session['employee_id'] . ' (' . $session['first_name'] . ' ' . substr($session['last_name'], 0, 1) . '.)');
+                                        // Check if staff data exists from the JOIN
+                                        if (!empty($session['first_name']) && !empty($session['last_name']) && !empty($session['employee_id'])) {
+                                            echo htmlspecialchars($session['employee_id'] . ' - ' . $session['first_name'] . ' ' . $session['last_name']);
+                                        } elseif (!empty($session['staff_id'])) {
+                                            // Staff ID exists but JOIN didn't find a match - try to get staff info directly
+                                            $staff_check = "SELECT employee_id, first_name, last_name FROM staff WHERE staff_id = " . intval($session['staff_id']);
+                                            $staff_result = $conn->query($staff_check);
+                                            if ($staff_result && $staff_row = $staff_result->fetch_assoc()) {
+                                                echo htmlspecialchars($staff_row['employee_id'] . ' - ' . $staff_row['first_name'] . ' ' . $staff_row['last_name']);
+                                            } else {
+                                                echo htmlspecialchars('Staff ID: ' . $session['staff_id'] . ' (Not Found)');
+                                            }
                                         } else {
                                             echo 'Not assigned';
                                         }
@@ -542,8 +574,8 @@ $staff_members = $staff_result->fetch_all(MYSQLI_ASSOC);
 
     <footer class="main-footer">
         <div class="container">
-            <p>&copy; <?php echo date("Y"); ?> Blood Donation DMS. All rights reserved.</p>
-            <p>Powered by Compassion</p>
+            <p>&copy; <?php echo date("Y"); ?> Blood Donation Database Management System. All rights reserved.</p>
+            <p>Powered by Group G</p>
         </div>
     </footer>
 

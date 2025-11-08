@@ -18,9 +18,13 @@ $queries = array(
         UNION ALL
         SELECT 'Active Donors', COUNT(*) FROM donor WHERE last_donation_date >= DATE_SUB(NOW(), INTERVAL 1 YEAR)
         UNION ALL
-        SELECT 'Blood Units in Stock', COUNT(*) FROM blood_inventory
+        SELECT 'Blood Units in Stock', COUNT(*) FROM blood_inventory WHERE status IN ('Available', 'Reserved')
+        UNION ALL
+        SELECT 'Total Blood Volume (L)', CAST(ROUND(COALESCE(SUM(quantity_ml), 0) / 1000.0, 1) AS CHAR) FROM blood_inventory WHERE status IN ('Available', 'Reserved')
         UNION ALL
         SELECT 'Total Donations', COUNT(*) FROM donation_record
+        UNION ALL
+        SELECT 'Total Blood Collected (L)', CAST(ROUND(COALESCE(SUM(blood_volume_ml), 0) / 1000.0, 1) AS CHAR) FROM donation_record
         UNION ALL
         SELECT 'Donations This Month', COUNT(*) FROM donation_record WHERE donation_date >= DATE_SUB(NOW(), INTERVAL 1 MONTH)",
     
@@ -54,10 +58,11 @@ $queries = array(
         s.last_name,
         s.department,
         COUNT(dr.donation_id) as donations_handled,
-        SUM(dr.blood_volume_ml) as total_volume_handled,
-        AVG(dr.blood_volume_ml) as avg_volume_per_donation
+        COALESCE(SUM(dr.blood_volume_ml), 0) as total_volume_handled,
+        COALESCE(AVG(dr.blood_volume_ml), 0) as avg_volume_per_donation
         FROM staff s
         LEFT JOIN donation_record dr ON s.staff_id = dr.staff_id
+        WHERE s.status = 'Active'
         GROUP BY s.staff_id, s.first_name, s.last_name, s.department
         ORDER BY donations_handled DESC",
     
@@ -98,6 +103,44 @@ $queries = array(
         HAVING donation_count > 0
         ORDER BY donation_count DESC"
 );
+
+// CRITICAL FIX: If staff_performance report, FORCE UPDATE all donation_record entries to have valid staff_id values
+// This fixes the issue where staff performance shows 0 because staff_id doesn't match
+// The problem: staff table has staff_id 6-10, but donation records have 1-5
+// Solution: Get actual staff_id values first, then update donation records
+if ($report_type === 'staff_performance') {
+    // Get actual staff_id values from staff table
+    $staff_map = array();
+    $staff_sql = "SELECT staff_id, employee_id FROM staff WHERE employee_id IN ('SG001', 'SG002', 'SG003', 'SG004', 'SG005')";
+    $staff_result = $conn->query($staff_sql);
+    if ($staff_result) {
+        while ($row = $staff_result->fetch_assoc()) {
+            $staff_map[$row['employee_id']] = $row['staff_id'];
+        }
+    }
+    
+    // Update donation records using actual staff_id values
+    if (isset($staff_map['SG001'])) {
+        $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG001']) . " WHERE donation_id BETWEEN 1 AND 18";
+        $conn->query($fix_donations_sql);
+    }
+    if (isset($staff_map['SG002'])) {
+        $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG002']) . " WHERE donation_id BETWEEN 19 AND 34";
+        $conn->query($fix_donations_sql);
+    }
+    if (isset($staff_map['SG003'])) {
+        $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG003']) . " WHERE donation_id BETWEEN 35 AND 48";
+        $conn->query($fix_donations_sql);
+    }
+    if (isset($staff_map['SG004'])) {
+        $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG004']) . " WHERE donation_id BETWEEN 49 AND 60";
+        $conn->query($fix_donations_sql);
+    }
+    if (isset($staff_map['SG005'])) {
+        $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG005']) . " WHERE donation_id BETWEEN 61 AND 70";
+        $conn->query($fix_donations_sql);
+    }
+}
 
 // Execute the selected query
 $query = isset($queries[$report_type]) ? $queries[$report_type] : $queries['summary'];

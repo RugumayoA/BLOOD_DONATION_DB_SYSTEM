@@ -569,8 +569,8 @@ $staff_members = $result->fetch_all(MYSQLI_ASSOC);
 
     <footer class="main-footer">
         <div class="container">
-            <p>&copy; <?php echo date("Y"); ?> Blood Donation DMS. All rights reserved.</p>
-            <p>Powered by Compassion</p>
+            <p>&copy; <?php echo date("Y"); ?> Blood Donation Database Management System. All rights reserved.</p>
+            <p>Powered by Group G</p>
         </div>
     </footer>
 

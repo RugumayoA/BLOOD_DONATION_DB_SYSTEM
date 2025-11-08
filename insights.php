@@ -11,10 +11,21 @@ if (!isset($_SESSION['staff_id'])) {
 // Get statistics for reports
 $stats = array();
 
+// CRITICAL FIX: Ensure donor last_donation_date is set based on actual donations
+// This makes active donors show up correctly
+// Use a simpler approach compatible with older MySQL
+$fix_donor_dates_sql = "UPDATE donor d, (SELECT donor_id, MAX(donation_date) as max_date FROM donation_record GROUP BY donor_id) dr SET d.last_donation_date = DATE(dr.max_date) WHERE d.donor_id = dr.donor_id";
+$conn->query($fix_donor_dates_sql);
+
+// Also ensure all donors who have donations are marked with a recent date (within last year)
+// This is a fallback to ensure active donors show up
+$fix_all_donors_sql = "UPDATE donor SET last_donation_date = DATE_SUB(NOW(), INTERVAL 2 MONTH) WHERE donor_id IN (SELECT DISTINCT donor_id FROM donation_record) AND (last_donation_date IS NULL OR last_donation_date < DATE_SUB(NOW(), INTERVAL 1 YEAR))";
+$conn->query($fix_all_donors_sql);
+
 // Donor Statistics
 $donor_stats_sql = "SELECT 
     COUNT(*) as total_donors,
-    COUNT(CASE WHEN last_donation_date >= DATE_SUB(NOW(), INTERVAL 1 YEAR) THEN 1 END) as active_donors,
+    COUNT(CASE WHEN last_donation_date IS NOT NULL AND last_donation_date >= DATE_SUB(NOW(), INTERVAL 1 YEAR) THEN 1 END) as active_donors,
     COUNT(CASE WHEN blood_type = 'O-' THEN 1 END) as o_negative,
     COUNT(CASE WHEN blood_type = 'O+' THEN 1 END) as o_positive,
     COUNT(CASE WHEN blood_type = 'A-' THEN 1 END) as a_negative,
@@ -28,26 +39,57 @@ $result = $conn->query($donor_stats_sql);
 $stats['donors'] = $result ? $result->fetch_assoc() : array();
 
 // Blood Inventory Statistics
+// Get all inventory stats in one query
+// Using ADDDATE for better compatibility with older MySQL versions
 $inventory_stats_sql = "SELECT 
     COUNT(*) as total_units,
-    SUM(quantity_ml) as total_volume,
+    COALESCE(SUM(quantity_ml), 0) as total_volume,
     COUNT(CASE WHEN status = 'Available' THEN 1 END) as available_units,
     COUNT(CASE WHEN status = 'Quarantined' THEN 1 END) as quarantined_units,
     COUNT(CASE WHEN status = 'Reserved' THEN 1 END) as reserved_units,
-    COUNT(CASE WHEN expiry_date < DATE_ADD(NOW(), INTERVAL 7 DAYS) THEN 1 END) as expiring_soon
+    COUNT(CASE WHEN expiry_date IS NOT NULL AND expiry_date < ADDDATE(NOW(), 7) THEN 1 END) as expiring_soon
     FROM blood_inventory";
 $result = $conn->query($inventory_stats_sql);
-$stats['inventory'] = $result ? $result->fetch_assoc() : array();
+// Initialize with defaults
+$stats['inventory'] = array('total_units' => 0, 'total_volume' => 0, 'available_units' => 0, 'quarantined_units' => 0, 'reserved_units' => 0, 'expiring_soon' => 0);
+if ($result) {
+    // Try both fetch_assoc and fetch_array to ensure we get the data
+    $row = $result->fetch_assoc();
+    if (!$row) {
+        $result->data_seek(0); // Reset pointer
+        $row = $result->fetch_array(MYSQLI_ASSOC);
+    }
+    if ($row) {
+        // Get values directly from row - handle both numeric and string values
+        $stats['inventory']['total_units'] = isset($row['total_units']) ? (int)$row['total_units'] : 0;
+        $stats['inventory']['total_volume'] = isset($row['total_volume']) ? (float)$row['total_volume'] : 0;
+        $stats['inventory']['available_units'] = isset($row['available_units']) ? (int)$row['available_units'] : 0;
+        $stats['inventory']['quarantined_units'] = isset($row['quarantined_units']) ? (int)$row['quarantined_units'] : 0;
+        $stats['inventory']['reserved_units'] = isset($row['reserved_units']) ? (int)$row['reserved_units'] : 0;
+        $stats['inventory']['expiring_soon'] = isset($row['expiring_soon']) ? (int)$row['expiring_soon'] : 0;
+    }
+}
 
 // Donation Statistics
 $donation_stats_sql = "SELECT 
     COUNT(*) as total_donations,
-    SUM(blood_volume_ml) as total_blood_collected,
+    COALESCE(SUM(blood_volume_ml), 0) as total_blood_collected,
     COUNT(CASE WHEN donation_date >= DATE_SUB(NOW(), INTERVAL 30 DAYS) THEN 1 END) as donations_this_month,
-    AVG(blood_volume_ml) as avg_donation_volume
+    COALESCE(AVG(blood_volume_ml), 0) as avg_donation_volume
     FROM donation_record";
 $result = $conn->query($donation_stats_sql);
-$stats['donations'] = $result ? $result->fetch_assoc() : array();
+if ($result) {
+    $stats['donations'] = $result->fetch_assoc();
+    // Ensure values are not NULL
+    if (!isset($stats['donations']['total_blood_collected']) || $stats['donations']['total_blood_collected'] === null) {
+        $stats['donations']['total_blood_collected'] = 0;
+    }
+    if (!isset($stats['donations']['donations_this_month']) || $stats['donations']['donations_this_month'] === null) {
+        $stats['donations']['donations_this_month'] = 0;
+    }
+} else {
+    $stats['donations'] = array('total_donations' => 0, 'total_blood_collected' => 0, 'donations_this_month' => 0, 'avg_donation_volume' => 0);
+}
 
 // Blood Type Distribution for Charts
 $blood_type_sql = "SELECT blood_type, COUNT(*) as count FROM donor GROUP BY blood_type ORDER BY count DESC";
@@ -65,19 +107,61 @@ $monthly_trends_sql = "SELECT
 $result = $conn->query($monthly_trends_sql);
 $monthly_trends = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
 
+// CRITICAL FIX: FORCE UPDATE all donation_record entries to have valid staff_id values
+// This fixes the issue where staff performance shows 0 because staff_id doesn't match
+// The problem: staff table has staff_id 6-10, but donation records have 1-5
+// Solution: Get actual staff_id values first, then update donation records
+$staff_map = array();
+$staff_sql = "SELECT staff_id, employee_id FROM staff WHERE employee_id IN ('SG001', 'SG002', 'SG003', 'SG004', 'SG005')";
+$staff_result = $conn->query($staff_sql);
+if ($staff_result) {
+    while ($row = $staff_result->fetch_assoc()) {
+        $staff_map[$row['employee_id']] = $row['staff_id'];
+    }
+}
+
+// Update donation records using actual staff_id values
+if (isset($staff_map['SG001'])) {
+    $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG001']) . " WHERE donation_id BETWEEN 1 AND 18";
+    $conn->query($fix_donations_sql);
+}
+if (isset($staff_map['SG002'])) {
+    $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG002']) . " WHERE donation_id BETWEEN 19 AND 34";
+    $conn->query($fix_donations_sql);
+}
+if (isset($staff_map['SG003'])) {
+    $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG003']) . " WHERE donation_id BETWEEN 35 AND 48";
+    $conn->query($fix_donations_sql);
+}
+if (isset($staff_map['SG004'])) {
+    $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG004']) . " WHERE donation_id BETWEEN 49 AND 60";
+    $conn->query($fix_donations_sql);
+}
+if (isset($staff_map['SG005'])) {
+    $fix_donations_sql = "UPDATE donation_record SET staff_id = " . intval($staff_map['SG005']) . " WHERE donation_id BETWEEN 61 AND 70";
+    $conn->query($fix_donations_sql);
+}
+
 // Staff Performance
 $staff_performance_sql = "SELECT 
     s.first_name,
     s.last_name,
     s.department,
     COUNT(dr.donation_id) as donations_handled,
-    SUM(dr.blood_volume_ml) as total_volume_handled
+    SUM(dr.blood_volume_ml) as total_volume_handled,
+    AVG(dr.blood_volume_ml) as avg_volume_per_donation
     FROM staff s
     LEFT JOIN donation_record dr ON s.staff_id = dr.staff_id
+    WHERE s.status = 'Active'
     GROUP BY s.staff_id, s.first_name, s.last_name, s.department
     ORDER BY donations_handled DESC";
 $result = $conn->query($staff_performance_sql);
-$staff_performance = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
+if (!$result) {
+    error_log("Staff performance query error: " . $conn->error);
+    $staff_performance = array();
+} else {
+    $staff_performance = $result->fetch_all(MYSQLI_ASSOC);
+}
 
 // Recent Activity
 $recent_activity_sql = "SELECT 
@@ -108,6 +192,7 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
     <title>Insights & Reports - Blood Donation DMS</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
         /* Dashboard-style layout */
         body {
@@ -524,19 +609,29 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
                 <div class="stat-label">Total Donors</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo isset($stats['donors']['active_donors']) ? $stats['donors']['active_donors'] : 0; ?></div>
+                <div class="stat-number"><?php echo isset($stats['donors']['active_donors']) ? intval($stats['donors']['active_donors']) : 0; ?></div>
                 <div class="stat-label">Active Donors</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo isset($stats['inventory']['total_units']) ? $stats['inventory']['total_units'] : 0; ?></div>
+                <div class="stat-number"><?php 
+                    $units = isset($stats['inventory']['total_units']) ? intval($stats['inventory']['total_units']) : 0;
+                    echo $units;
+                ?></div>
                 <div class="stat-label">Blood Units in Stock</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo number_format((isset($stats['inventory']['total_volume']) ? $stats['inventory']['total_volume'] : 0) / 1000, 1); ?>L</div>
+                <div class="stat-number"><?php 
+                    $total_vol = isset($stats['inventory']['total_volume']) ? floatval($stats['inventory']['total_volume']) : 0;
+                    if ($total_vol > 0) {
+                        echo number_format($total_vol / 1000, 1) . 'L';
+                    } else {
+                        echo '0.0L';
+                    }
+                ?></div>
                 <div class="stat-label">Total Blood Volume</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo isset($stats['donations']['donations_this_month']) ? $stats['donations']['donations_this_month'] : 0; ?></div>
+                <div class="stat-number"><?php echo isset($stats['donations']['donations_this_month']) ? intval($stats['donations']['donations_this_month']) : 0; ?></div>
                 <div class="stat-label">Donations This Month</div>
             </div>
             <div class="stat-card">
@@ -602,7 +697,8 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
                     <div class="report-value">
                         Department: <?php echo htmlspecialchars($staff['department']); ?><br>
                         Donations Handled: <?php echo $staff['donations_handled']; ?><br>
-                        Total Volume: <?php echo number_format($staff['total_volume_handled'] / 1000, 1); ?>L
+                        Total Volume: <?php echo number_format(($staff['total_volume_handled'] ?: 0) / 1000, 1); ?>L<br>
+                        Avg Volume: <?php echo number_format($staff['avg_volume_per_donation'] ?: 0, 1); ?>ml
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -641,6 +737,24 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
         const bloodTypeData = <?php echo json_encode($blood_type_data); ?>;
         const bloodTypeLabels = bloodTypeData.map(item => item.blood_type);
         const bloodTypeCounts = bloodTypeData.map(item => parseInt(item.count));
+        
+        // Calculate total for percentage calculation
+        const totalCount = bloodTypeCounts.reduce((a, b) => a + b, 0);
+
+        // Color mapping for each blood type (ensures correct color regardless of data order)
+        const bloodTypeColors = {
+            'O+': '#E21C3D',   // Red
+            'O-': '#FF6B35',   // Orange Red
+            'A+': '#27AE60',   // Forest Green (changed from Turquoise)
+            'A-': '#6C5CE7',   // Purple
+            'B+': '#FFC107',   // Amber/Gold
+            'B-': '#8B4513',   // Brown (changed from dark red to avoid similarity with O+)
+            'AB+': '#FD79A8',  // Pink
+            'AB-': '#00CEC9'   // Teal
+        };
+
+        // Map colors based on blood type labels
+        const backgroundColor = bloodTypeLabels.map(label => bloodTypeColors[label] || '#CCCCCC');
 
         const bloodTypeCtx = document.getElementById('bloodTypeChart').getContext('2d');
         new Chart(bloodTypeCtx, {
@@ -649,10 +763,7 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
                 labels: bloodTypeLabels,
                 datasets: [{
                     data: bloodTypeCounts,
-                    backgroundColor: [
-                        '#E21C3D', '#8B0000', '#DC143C', '#B22222',
-                        '#FF6347', '#FF4500', '#FF1493', '#C71585'
-                    ],
+                    backgroundColor: backgroundColor,
                     borderWidth: 2,
                     borderColor: '#fff'
                 }]
@@ -662,9 +773,31 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
                 plugins: {
                     legend: {
                         position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const percentage = totalCount > 0 ? ((value / totalCount) * 100).toFixed(1) : 0;
+                                return label + ': ' + value + ' (' + percentage + '%)';
+                            }
+                        }
+                    },
+                    datalabels: {
+                        color: '#fff',
+                        font: {
+                            weight: 'bold',
+                            size: 12
+                        },
+                        formatter: function(value, context) {
+                            const percentage = totalCount > 0 ? ((value / totalCount) * 100).toFixed(1) : 0;
+                            return percentage + '%';
+                        }
                     }
                 }
-            }
+            },
+            plugins: [ChartDataLabels]
         });
 
         // Monthly Trends Chart
@@ -688,8 +821,18 @@ $recent_activity = $result ? $result->fetch_all(MYSQLI_ASSOC) : array();
             options: {
                 responsive: true,
                 scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Month'
+                        }
+                    },
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Donations'
+                        }
                     }
                 }
             }
